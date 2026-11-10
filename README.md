@@ -4,6 +4,8 @@
 
 > A zero-dependency, first-person dungeon-crawler prototype written in vanilla HTML/CSS/JS with a hand-rolled Canvas 2D renderer.
 
+![余烬地窟游戏截图](docs/screenshot.png)
+
 ## 试玩 / Play
 
 - 在线试玩：https://sjjsbxb.github.io/Underkeep/
@@ -37,6 +39,8 @@
 ├── index.html   # 页面骨架、HUD 与按钮
 ├── style.css    # 界面主题与响应式布局
 ├── dungeon.js   # 地图数据、游戏循环、渲染器、战斗与交互逻辑
+├── docs/
+│   └── screenshot.png
 └── README.md
 ```
 
