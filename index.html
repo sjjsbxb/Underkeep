@@ -7,6 +7,10 @@
   <title>余烬地窟 · Ashen Vault</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23111815'/><text x='16' y='23' font-size='19' text-anchor='middle' fill='%23d9a441'>◈</text></svg>">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="camp.css">
+  <script src="missions.js" defer></script>
+  <script src="expedition-save.js" defer></script>
+  <script src="camp.js" defer></script>
   <script src="dungeon.js" defer></script>
 </head>
 <body>
@@ -17,18 +21,119 @@
         <div><p class="eyebrow">A S H E N &nbsp; V A U L T</p><h1>余烬地窟</h1></div>
       </div>
       <div class="top-tools">
-        <span class="chapter">第 I 层 <span>／</span> 守火人的墓窟</span>
+        <span class="chapter" id="chapter">营地 <span>／</span> 灰鸦镇</span>
         <button id="sound" class="quiet" aria-pressed="false" title="切换音效">音效关</button>
-        <button id="help" class="quiet" title="查看操作说明">操作</button>
+        <button id="help" class="quiet" title="查看操作说明" hidden>操作</button>
       </div>
     </header>
-    <div class="workspace">
-      <section class="main-column" aria-label="地牢与队伍">
+    <section id="camp" aria-labelledby="camp-title">
+      <div class="camp-heading">
+        <div><p class="eyebrow">THE HAMLET &nbsp; ◆ &nbsp; 远征营地</p><h2 id="camp-title">灰鸦镇</h2></div>
+        <div class="camp-heading-actions">
+          <button type="button" id="camp-last-report" class="camp-back" hidden>上次远征</button>
+          <button type="button" id="camp-back" class="camp-back" hidden>← 返回小镇</button>
+        </div>
+      </div>
+      <div class="camp-layout">
+        <section id="camp-town" class="camp-town" aria-label="灰鸦镇地图">
+          <div class="camp-scene">
+            <svg class="camp-map-art" viewBox="0 0 1672 941" aria-hidden="true">
+              <image href="camp-town-pixel.png" width="1672" height="941"/>
+              <path class="camp-outline tavern-outline" d="M94 366 234 251 395 102 407 100 586 156V92H576V62H675V94H665V227L798 337V351L769 371V645L723 702 671 729 548 765 145 750V550H125V434H153L140 407 116 395V382H94Z"/>
+              <path class="camp-outline shop-outline" d="M1073 433 1328 203 1344 202 1482 312V281H1474V254H1560V281H1553V375L1610 420V437L1582 456V659L1541 699 1535 731 1434 757 1234 742 1118 711V465L1096 449H1074Z"/>
+            </svg>
+            <button type="button" class="camp-hotspot tavern-hotspot" id="camp-tavern" aria-label="断杯酒馆，招募佣兵">
+              <span class="camp-plaque"><strong>断杯酒馆</strong><small>招募佣兵</small></span>
+            </button>
+            <button type="button" class="camp-hotspot shop-hotspot" id="camp-shop" aria-label="余火铁匠铺，购置装备">
+              <span class="camp-plaque"><strong>余火铁匠铺</strong><small>购置装备</small></span>
+            </button>
+          </div>
+          <p class="camp-caption"><span aria-hidden="true">◆</span> 点酒馆招募，点铁匠铺购装。准备好后，从名册选一人，再点「出征」。</p>
+        </section>
+        <section class="camp-facility" id="camp-facility" aria-labelledby="facility-title" hidden>
+          <header class="facility-banner">
+            <p class="eyebrow" id="facility-kicker"></p>
+            <h3 id="facility-title" tabindex="-1"></h3>
+          </header>
+          <div class="camp-interior">
+            <p class="facility-intro" id="facility-intro"></p>
+            <label id="shop-recipient" hidden>装备交给 <select id="shop-hero"></select></label>
+            <ul class="camp-stock" id="camp-stock"></ul>
+          </div>
+        </section>
+        <section class="camp-prepare" id="camp-prepare" aria-labelledby="prepare-title" hidden>
+          <header class="prepare-heading">
+            <p class="eyebrow">EXPEDITION &nbsp; ◆ &nbsp; 出征整备</p>
+            <h3 id="prepare-title" tabindex="-1">守火人的墓窟</h3>
+          </header>
+          <fieldset class="route-picker">
+            <legend class="route-legend">选择任务</legend>
+            <div class="route-map">
+              <svg viewBox="0 0 620 220" preserveAspectRatio="none" aria-hidden="true">
+                <path class="route-terrain" d="M-9 70 83 19l52 39 68-43 75 32 65-19 56 30 64-31 109 31 58-25v189H-9zM-9 146l104-30 92 37 105-24 65 49 125-59 100 26 45-14"/>
+                <path class="route-path" id="route-vault-path" d="M121 154q69-31 133-18t85-59q24-26 61-30"/>
+                <path class="route-path" id="route-mine-path" d="M121 154q92 21 181-3t174-21"/>
+              </svg>
+              <span class="route-marker route-town"><b aria-hidden="true">◆</b>灰鸦镇</span>
+              <div id="mission-options"></div>
+            </div>
+          </fieldset>
+          <div class="prepare-sheet">
+            <div><p class="eyebrow">委托</p><p id="prepare-contract"></p><p id="prepare-reward"></p></div>
+            <div><p class="eyebrow">出征英雄</p><p id="prepare-hero"></p><p id="prepare-equipment"></p><p>随身补给：治疗药剂 ×2</p></div>
+          </div>
+        </section>
+        <section class="camp-report" id="camp-report" aria-labelledby="report-title" hidden>
+          <header class="report-heading">
+            <p class="eyebrow">EXPEDITION RECORD &nbsp; ◆ &nbsp; 远征结算</p>
+            <h3 id="report-title" tabindex="-1"></h3>
+            <p id="report-subtitle"></p>
+          </header>
+          <div class="report-body">
+            <dl class="report-stats">
+              <div><dt>入库金币</dt><dd id="report-gold"></dd></div>
+              <div><dt>探索格数</dt><dd id="report-explored"></dd></div>
+              <div><dt>击败敌人</dt><dd id="report-kills"></dd></div>
+            </dl>
+            <h4>战利品与发现</h4>
+            <ul id="report-loot"></ul>
+            <p class="report-unlock" id="report-unlock" hidden></p>
+          </div>
+        </section>
+        <aside class="camp-roster" aria-labelledby="roster-title">
+          <div class="section-heading"><h3 id="roster-title">英雄名册</h3><span id="roster-count"></span></div>
+          <fieldset id="hero-roster"><legend>选择一名出征英雄</legend><div id="hero-options"></div></fieldset>
+          <div id="hero-detail"></div>
+        </aside>
+      </div>
+      <div class="camp-bar">
+        <div class="camp-treasury"><span>营地金库</span><strong><span aria-hidden="true">◈</span> <span id="camp-gold">100</span> 金币</strong></div>
+        <div class="camp-bar-action">
+          <button type="button" id="camp-depart">出征 →</button>
+          <button type="button" id="camp-abandon" class="camp-back" hidden>放弃存档</button>
+        </div>
+        <div><p id="camp-checkpoint" hidden></p><p id="camp-status" role="status" aria-live="polite"></p></div>
+      </div>
+      <dialog id="camp-abandon-dialog" aria-labelledby="abandon-title">
+        <form method="dialog">
+          <h3 id="abandon-title">放弃这次远征？</h3>
+          <p>会清除这次地牢进度，并记录为撤退。</p>
+          <div class="overlay-options">
+            <button value="cancel" autofocus>保留进度</button>
+            <button value="abandon">确认放弃</button>
+          </div>
+        </form>
+      </dialog>
+    </section>
+    <div class="workspace" id="expedition" hidden>
+      <section class="main-column" aria-label="地牢与探险者">
         <div class="viewport">
           <canvas id="view" width="512" height="288" role="img" aria-label="第一人称地牢视野"></canvas>
           <div class="view-top"><span id="compass">↑ 北</span><span id="area">石门入口</span></div>
           <div id="encounter" class="encounter" hidden>
             <span id="enemy-name"></span><span id="enemy-life"></span><div class="enemy-meter"><i></i></div>
+            <span id="enemy-armor" hidden></span>
           </div>
           <div class="prompt" id="prompt" aria-live="polite"></div>
           <div id="overlay" class="overlay" hidden>
@@ -43,22 +148,33 @@
         <div class="control-strip">
           <div class="strip-label"><strong id="mode">探索</strong><span id="mode-detail">朝向目标后互动</span></div>
           <div class="controls" id="explore-actions" aria-label="探索操作">
-            <button data-action="left" title="左转 Q 或 ←" aria-label="左转">↶</button>
-            <button data-action="forward" title="前进 W 或 ↑" aria-label="前进">↑</button>
-            <button data-action="back" title="后退 S 或 ↓" aria-label="后退">↓</button>
-            <button data-action="right" title="右转 E 或 →" aria-label="右转">↷</button>
+            <button data-action="left" title="左转 Q 或 ←" aria-label="左转">↶ <span class="touch-label" aria-hidden="true">左转</span></button>
+            <button data-action="forward" title="前进 W 或 ↑" aria-label="前进">↑ <span class="touch-label" aria-hidden="true">前进</span></button>
+            <button data-action="right" title="右转 E 或 →" aria-label="右转">↷ <span class="touch-label" aria-hidden="true">右转</span></button>
+            <button data-action="strafeLeft" class="touch-control" title="左移 A" aria-label="左移">← <span class="touch-label" aria-hidden="true">左移</span></button>
+            <button data-action="back" title="后退 S 或 ↓" aria-label="后退">↓ <span class="touch-label" aria-hidden="true">后退</span></button>
+            <button data-action="strafeRight" class="touch-control" title="右移 D" aria-label="右移">→ <span class="touch-label" aria-hidden="true">右移</span></button>
             <button data-action="interact" class="emphasis">互动 <kbd>F</kbd></button>
           </div>
           <div class="controls" id="battle-actions" aria-label="战斗操作" hidden>
             <button data-action="attack">攻击 <kbd>1</kbd></button>
-            <button data-action="skill" class="emphasis">战技 <kbd>2</kbd></button>
+            <button data-action="skill" class="emphasis"><span id="skill-name">战技</span> <kbd>2</kbd></button>
             <button data-action="guard">防御 <kbd>3</kbd></button>
             <button data-action="potion">药剂 <kbd>4</kbd></button>
           </div>
         </div>
-        <section class="party-section" aria-labelledby="party-heading">
-          <div class="section-heading"><h2 id="party-heading">远征小队</h2><span id="supplies">药剂 ×2</span></div>
-          <div class="party" id="party"></div>
+        <p class="field-guide" id="field-guide" hidden><strong>上手提示</strong><span id="field-guide-copy"></span></p>
+        <section class="player-section" aria-labelledby="player-heading">
+          <div class="section-heading"><h2 id="player-heading">探险者</h2><span id="expedition-save-status"></span><span id="supplies">药剂 ×2</span></div>
+          <div class="player-card" id="player-card">
+            <div class="player-identity" id="player-identity">
+              <div><p class="player-name"></p><p class="player-role"></p></div>
+            </div>
+            <div class="player-stats">
+              <div class="stat" id="player-life"><span>生命</span><i aria-hidden="true"><b></b></i><span class="stat-value"></span></div>
+              <div class="stat focus" id="player-focus"><span>专注</span><i aria-hidden="true"><b></b></i><span class="stat-value"></span></div>
+            </div>
+          </div>
         </section>
       </section>
       <aside class="sidebar">
@@ -70,7 +186,7 @@
         <section class="panel map-panel">
           <div class="section-heading"><h2>探路图</h2><span id="map-count"></span></div>
           <canvas id="map" width="240" height="224" role="img" aria-label="已探索的地牢地图"></canvas>
-          <div class="legend"><span>▲ 队伍</span><span>◆ 地标</span><span>■ 未探明</span></div>
+          <div class="legend"><span>▲ 你</span><span>◆ 地标</span><span>■ 未探明</span></div>
         </section>
         <section class="panel log-panel">
           <div class="section-heading"><h2>远征记录</h2><span id="step-count"></span></div>
@@ -78,7 +194,7 @@
         </section>
       </aside>
     </div>
-    <footer><span>ASHEN VAULT <b>◆</b> 原型 0.1</span><span>WASD 移动 <b>·</b> Q / E 转向 <b>·</b> F 互动</span></footer>
+    <footer><span>ASHEN VAULT <b>◆</b> 原型 0.7</span><span id="footer-controls" hidden>WASD 移动 <b>·</b> Q / E 转向 <b>·</b> F 互动</span></footer>
   </main>
 </body>
 </html>

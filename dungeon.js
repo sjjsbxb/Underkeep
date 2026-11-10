@@ -1,48 +1,7 @@
 "use strict";
 
-const layout = [
-  "###############",
-  "#....#..#.....#",
-  "#.#..#..#.....#",
-  "#.#.....#.....#",
-  "#...#...#.....#",
-  "###.#...###D###",
-  "#...#...#.....#",
-  "#.....#.......#",
-  "###.#.#.#####.#",
-  "#...#.#.......#",
-  "#.#.#.#####.#.#",
-  "#.....#.....#.#",
-  "#.....#.......#",
-  "###############",
-];
 const directions = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const headings = ["↑ 北", "→ 东", "↓ 南", "← 西"];
-const roster = [
-  { name: "赫岚", role: "盾卫", art: "guard", hp: 31, focus: 4, attack: 5, skill: "盾击", description: "盾击 7 伤害，并替全队挡下部分反击" },
-  { name: "苔鸦", role: "斥候", art: "scout", hp: 24, focus: 4, attack: 6, skill: "破绽", description: "破绽 8 伤害，下两次攻击额外 +3" },
-  { name: "墨灯", role: "咒师", art: "mage", hp: 21, focus: 4, attack: 4, skill: "余火", description: "余火 12 伤害，对守陵者也有效" },
-  { name: "阿弥", role: "司祭", art: "priest", hp: 25, focus: 4, attack: 5, skill: "净光", description: "净光治疗伤势最重的队友 12 点" },
-];
-const encounters = [
-  { x: 3, y: 8, name: "墓道骸兵", hp: 27, art: "skeleton", damage: 8 },
-  { x: 7, y: 7, name: "巡墓亡卒", hp: 41, art: "skeleton", damage: 12 },
-  { x: 11, y: 11, name: "失火侍从", hp: 38, art: "warden", damage: 10 },
-  { x: 11, y: 3, name: "灰誓守陵者", hp: 78, art: "warden", damage: 16 },
-];
-const landmarks = [
-  { x: 1, y: 1, type: "key", art: "chest", title: "守火人的遗匣" },
-  { x: 5, y: 11, type: "cache", art: "chest", title: "遗落的药箱" },
-  { x: 1, y: 11, type: "secret", art: "plaque", title: "松动的石板" },
-  { x: 9, y: 7, type: "riddle", art: "altar", title: "三印石台" },
-  { x: 13, y: 11, type: "shrine", art: "altar", title: "回响圣龛" },
-  { x: 11, y: 1, type: "exit", art: "portal", title: "余烬封印" },
-];
-const torches = [
-  [3.12, 11.35], [3.82, 9.45], [3.65, 6.5], [3.28, 2.35], [1.45, 1.28],
-  [7.69, 7.32], [9.49, 6.28], [11.65, 6.23], [12.72, 11.65],
-  [10.28, 4.3], [12.70, 3.27], [11.72, 1.33], [7.72, 3.25],
-];
 const $ = (selector) => document.querySelector(selector);
 const controls = [...document.querySelectorAll("[data-action]")];
 const viewport = $("#view");
@@ -55,7 +14,6 @@ const pixels = ctx.createImageData(width, height);
 const pixelData = new Uint32Array(pixels.data.buffer);
 const depths = new Float32Array(width);
 const drawables = {};
-const actorPanels = [];
 let game;
 let camera;
 let motion;
@@ -65,33 +23,84 @@ let sound = false;
 let modalOptions = [];
 let focusBeforeModal;
 
-function freshGame() {
+function freshGame(mission, hero = camp.profile()) {
+  const { x, y } = mission.start;
   game = {
-    x: 3, y: 12, facing: 0, steps: 0, potions: 2, sword: false,
-    party: roster.map((member) => ({ ...member, life: member.hp, energy: member.focus })),
-    enemies: encounters.map((enemy) => ({ ...enemy, life: enemy.hp })),
+    id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
+    x, y, facing: 0, steps: 0, potions: 2, sword: false,
+    mission, hero, player: { life: hero.hp, energy: hero.focus },
+    enemies: mission.encounters.map((enemy) => ({ ...enemy, life: enemy.hp })),
     visited: new Set(), seen: new Set(), used: new Set(), battle: null, ended: false,
     door: false, logs: [],
   };
-  camera = { x: 3.5, y: 12.5, angle: -Math.PI / 2 };
+  note(`${hero.name}${mission.intro}`);
+  enterExpedition(game);
+  tone("depart");
+}
+
+function enterExpedition(run) {
+  game = run;
+  const { mission, hero, x, y, facing } = game;
+  game.lightField = buildLightField(mission);
+  camera = { x: x + .5, y: y + .5, angle: (facing - 1) * Math.PI / 2 };
   motion = null;
   flash = null;
   closeModal(false);
+  $("#camp").hidden = true;
+  $("#expedition").hidden = false;
+  $("#help").hidden = false;
+  $("#footer-controls").hidden = false;
+  $("#chapter").textContent = `${mission.chapter} ／ ${mission.title}`;
+  $("#player-identity .portrait")?.remove();
+  $("#player-identity").prepend(buildPortrait(hero.id));
+  $(".player-name").textContent = hero.name;
+  $(".player-role").textContent = hero.role;
+  $("#skill-name").textContent = hero.skill;
   reveal();
-  note("石门在身后合拢。沿着火光，寻找余烬封印。");
+  updateCheckpoint();
+  $(game.battle ? "[data-action=attack]" : "[data-action=forward]").focus({ preventScroll: true });
+}
+
+function showCamp(message) {
+  const returning = Boolean(game);
+  game = null;
+  closeModal(false);
+  $("#expedition").hidden = true;
+  $("#help").hidden = true;
+  $("#footer-controls").hidden = true;
+  $("#chapter").innerHTML = "营地 <span>／</span> 灰鸦镇";
+  $("#camp").hidden = false;
+  camp.show(message);
+  if (returning) $($("#camp-report").hidden ? "#camp-depart" : "#report-title").focus({ preventScroll: true });
+}
+
+function updateCheckpoint() {
   update();
+  if (!game.ended) {
+    const saved = camp.saveExpedition(expeditionSave.capture(game));
+    $("#expedition-save-status").textContent = saved ? "已自动保存" : "本页临时进度";
+  }
 }
 
 function tile(x, y) {
-  return layout[y]?.[x] ?? "#";
+  return game.mission.layout[y]?.[x] ?? "#";
+}
+
+function wallAt(x, y) {
+  const ground = tile(x, y);
+  return ground === "#" || (ground === "D" && !game.door);
+}
+
+function floodedAt(x, y) {
+  return !game.used.has("drain") && tile(x, y) === "~";
 }
 
 function solid(x, y) {
-  return tile(x, y) === "#" || (tile(x, y) === "D" && !game.door);
+  return wallAt(x, y) || floodedAt(x, y);
 }
 
 function key(x, y) {
-  return y * layout[0].length + x;
+  return y * game.mission.layout[0].length + x;
 }
 
 function enemyAt(x, y) {
@@ -99,7 +108,7 @@ function enemyAt(x, y) {
 }
 
 function landmarkAt(x, y) {
-  return landmarks.find((item) => item.x === x && item.y === y && !game.used.has(item.type));
+  return game.mission.landmarks.find((item) => item.x === x && item.y === y && !game.used.has(item.type));
 }
 
 function ahead() {
@@ -114,7 +123,7 @@ function reveal() {
       const x = game.x + dx * distance;
       const y = game.y + dy * distance;
       game.seen.add(key(x, y));
-      if (solid(x, y)) break;
+      if (wallAt(x, y)) break;
     }
   }
   game.seen.add(key(game.x, game.y));
@@ -153,14 +162,17 @@ function describe(title, copy) {
 }
 
 function finish(won) {
+  if (game.ended) return;
   game.ended = true;
   game.battle = null;
-  const title = won ? "余烬重燃" : "火光熄灭";
+  const { mission } = game;
+  const result = camp.settleExpedition(expeditionSave.capture(game), won ? "won" : "lost");
+  const title = won ? mission.successTitle : "火光熄灭";
   const copy = won
-    ? `你把手覆在封印上。地窟深处传来一声长叹，墓道的火焰一盏接一盏亮起。\n本次远征走过 ${game.visited.size} 格，击败 ${game.enemies.filter((enemy) => !enemy.life).length} 名守墓者。`
-    : "最后一支火把落在石阶上。地窟记住了你们的脚步。";
+    ? `${mission.success}\n营地金库获得 ${result?.reward ?? 0} 金币。`
+    : "你的火把落在石阶上。地窟记住了你的脚步。";
   note(title, true);
-  openModal(won ? "远征完成" : "远征结束", title, copy, [["再进地窟", freshGame]]);
+  openModal(won ? "远征完成" : "远征结束", title, copy, [["返回营地", () => showCamp()]]);
   tone(won ? "win" : "hurt");
 }
 
@@ -181,7 +193,7 @@ function useLandmark(item) {
     case "secret":
       game.used.add("secret");
       game.sword = true;
-      note("赫岚换上守火人之刃，普通攻击 +3。", true);
+      note("你拾起守火人之刃，本次远征的普通攻击额外 +3。", true);
       describe(item.title, "你从石板背后的凹槽抽出一柄短剑。剑刃仍带着温度。");
       break;
     case "riddle":
@@ -191,8 +203,8 @@ function useLandmark(item) {
         ["余烬", () => {
           game.used.add("riddle");
           note("余烬印亮了，北侧铁门的暗锁弹开。", true);
-          tone("win");
-          update();
+          tone("mechanism");
+          updateCheckpoint();
           describe("印记亮起", "一道暖光沿石缝向北爬去。那里还有一扇需要黄铜钥匙才能开启的铁门。");
         }],
         ["退后", () => closeModal()],
@@ -200,16 +212,27 @@ function useLandmark(item) {
       break;
     case "shrine":
       game.used.add("shrine");
-      for (const member of game.party) {
-        member.life = member.hp;
-        member.energy = member.focus;
-      }
-      note("圣龛恢复了整支小队的生命与专注。", true);
-      describe(item.title, "你们借圣龛里的旧火歇息。火苗慢慢变蓝，随后静静熄灭。");
+      game.player.life = game.hero.hp;
+      game.player.energy = game.hero.focus;
+      note("圣龛恢复了你的生命与专注。", true);
+      describe(item.title, item.copy ?? "你借圣龛里的旧火歇息。火苗慢慢变蓝，随后静静熄灭。");
+      break;
+    case "drain":
+      openModal("矿井机关", item.title, "闸轮旁刻着排水渠的走向。转动闸轮，积水便会流入井底。", [
+        ["转动闸轮", () => {
+          game.used.add("drain");
+          reveal();
+          note("积水退去，北侧采掘厅和两条横巷可以通行了。", true);
+          tone("mechanism");
+          updateCheckpoint();
+          describe("水位下降", "铁闸深处发出轰鸣，水面逐渐降到石阶下方。");
+        }],
+        ["退后", () => closeModal()],
+      ]);
       break;
     case "exit":
       if (game.enemies.at(-1).life > 0) {
-        describe(item.title, "符文锁在守陵者的誓言上。击败守陵者后才能触碰封印。");
+        describe(item.title, game.mission.exitBlocked);
       } else {
         finish(true);
       }
@@ -219,7 +242,7 @@ function useLandmark(item) {
 
 function wrongSeal(item) {
   note("印记陷了下去，机关纹丝未动。", true);
-  update();
+  updateCheckpoint();
   describe(item.title, "石缝里飘出一缕冷烟。你想起守火人或许留下过线索。");
 }
 
@@ -234,7 +257,7 @@ function interact() {
       game.door = true;
       reveal();
       note("钥匙转动，铁门向暗处滑开。", true);
-      tone("win");
+      tone("mechanism");
     } else {
       const needs = !game.used.has("key") ? "锁孔需要一把黄铜钥匙。" : "";
       const seal = !game.used.has("riddle") ? "门后有一道暗锁，纹样与东厅的三印石台相同。" : "";
@@ -242,6 +265,8 @@ function interact() {
     }
   } else if (item) {
     useLandmark(item);
+  } else if (floodedAt(x, y)) {
+    describe("淹没的通道", "水没过了头顶。西侧泵房的闸轮可以排水。");
   } else {
     note("伸手摸过去，只有湿冷的石头。");
   }
@@ -250,111 +275,122 @@ function interact() {
 function startBattle(enemy) {
   const enemyDirection = directions.findIndex(([dx, dy]) => game.x + dx === enemy.x && game.y + dy === enemy.y);
   if (enemyDirection !== -1) game.facing = enemyDirection;
-  game.battle = { enemy, actor: game.party.findIndex((member) => member.life > 0), round: 1, guard: new Set(), ward: false, exposed: 0 };
+  game.battle = { enemy, round: 1 };
   note(`${enemy.name}挡住了去路。`, true);
-  tone("hurt");
+  tone("encounter");
 }
 
-function wound(member, damage, battle) {
-  if (battle.ward) damage = Math.ceil(damage * .6);
-  if (battle.guard.has(member.name)) damage = Math.ceil(damage * .45);
-  member.life = Math.max(0, member.life - damage);
-  note(`${member.name}受到 ${damage} 点伤害${member.life ? "。" : "，倒下了。"}`);
-}
-
-function retaliation(battle) {
-  const { enemy, round } = battle;
-  const living = game.party.filter((member) => member.life > 0);
-  if (enemy === game.enemies.at(-1) && round % 2 === 0) {
-    note("守陵者劈下燃烧的长刃。", true);
-    for (const member of living) wound(member, 9, battle);
-  } else {
-    const front = living.find((member) => member.role === "盾卫") ?? living[(round - 1) % living.length];
-    wound(front, enemy.damage, battle);
+function enemyIntent({ enemy, round, interruptRound, interruptPenalty }) {
+  if (enemy.charge && round % 3 === 2) {
+    return { kind: "charge", damage: 0, interrupted: interruptRound === round + 1 };
   }
+  if (enemy.heavyDamage && round % (enemy.charge ? 3 : 2) === 0) {
+    if (round === interruptRound) return { kind: "staggered", damage: enemy.damage - interruptPenalty, name: "仓促反击" };
+    return { kind: "heavy", damage: enemy.heavyDamage, name: enemy.heavyName };
+  }
+  return { kind: "normal", damage: enemy.damage, name: "反击" };
+}
+
+function retaliation(battle, damageMultiplier) {
+  const intent = enemyIntent(battle);
+  const { enemy } = battle;
+  if (intent.kind === "charge") {
+    if (!intent.interrupted) {
+      note(`${enemy.name}高举铁镐，下一回合将使出${enemy.heavyName}。`, true);
+      tone("charge");
+    }
+    battle.round++;
+    return;
+  }
+  const damage = Math.ceil(intent.damage * damageMultiplier);
+  const { player } = game;
+  player.life = Math.max(0, player.life - damage);
+  note(`${enemy.name}的${intent.name}造成 ${damage} 点伤害。`);
   flash = { start: performance.now(), color: "red" };
-  tone("hurt");
-  if (!game.party.some((member) => member.life > 0)) {
+  if (!player.life) {
     finish(false);
     return;
   }
+  tone(intent.kind === "heavy" ? "heavy" : "hurt");
   battle.round++;
-  battle.actor = game.party.findIndex((member) => member.life > 0);
-  battle.ward = false;
-  battle.guard.clear();
+  if (enemyIntent(battle).kind === "heavy") tone("charge");
 }
 
-function attack(enemy, damage, name, battle) {
-  if (battle.exposed > 0) {
-    damage += 3;
-    battle.exposed--;
-  }
+function attack(enemy, damage, name) {
   enemy.life = Math.max(0, enemy.life - damage);
   note(`${name}造成 ${damage} 点伤害。`);
   flash = { start: performance.now(), color: "gold" };
   tone("hit");
 }
 
-function injuredMember() {
-  return game.party.filter((member) => member.life > 0 && member.life < member.hp)
-    .sort((a, b) => (a.life / a.hp) - (b.life / b.hp))[0];
+function physicalDamage(enemy, power) {
+  return Math.max(1, power - (enemy.armor ?? 0));
 }
 
-function heal(member, amount, name) {
-  const restored = Math.min(amount, member.hp - member.life);
-  member.life += restored;
-  note(`${name}让${member.name}恢复了 ${restored} 点生命。`);
-  tone("win");
+function basicAttackDamage(hero, enemy) {
+  return physicalDamage(enemy, hero.attack + (game.sword ? 3 : 0));
+}
+
+function skillEffect(hero, battle, intent) {
+  const { enemy, round } = battle;
+  const armorBreak = Math.min(hero.armorBreak ?? 0, enemy.armor ?? 0);
+  const canInterrupt = hero.id === "scout" && (intent.kind === "heavy" || intent.kind === "charge");
+  return {
+    damage: hero.armorBreak ? hero.power : physicalDamage(enemy, hero.power),
+    multiplier: hero.heavyBlock ? (intent.kind === "heavy" ? (100 - hero.heavyBlock) / 100 : .6) : 1,
+    armorBreak,
+    interruptRound: canInterrupt ? round + (intent.kind === "charge" ? 1 : 0) : null,
+  };
 }
 
 function battleAction(action) {
-  const battle = game.battle;
-  const { enemy, actor } = battle;
-  const member = game.party[actor];
-  const target = injuredMember();
+  const { battle, player, hero } = game;
+  const { enemy } = battle;
+  let damageMultiplier = 1;
   if (action === "attack") {
-    attack(enemy, member.attack + (game.sword && actor === 0 ? 3 : 0), member.name, battle);
+    attack(enemy, basicAttackDamage(hero, enemy), "普通攻击");
   } else if (action === "guard") {
-    battle.guard.add(member.name);
-    member.energy = Math.min(member.focus, member.energy + 1);
-    note(`${member.name}架起防御，恢复 1 点专注。`);
-  } else if (action === "potion" && game.potions && target) {
+    damageMultiplier = 1 / 3;
+    if (player.energy < hero.focus) {
+      player.energy++;
+      note("你举盾防御，恢复 1 点专注。");
+    } else {
+      note("你举盾防御。");
+    }
+  } else if (action === "potion" && game.potions && player.life < hero.hp) {
     game.potions--;
-    heal(target, 16, "治疗药剂");
-  } else if (action === "skill" && member.energy && (actor !== 3 || target)) {
-    member.energy--;
-    switch (actor) {
-      case 0:
-        attack(enemy, 7, "盾击", battle);
-        battle.ward = true;
-        break;
-      case 1:
-        attack(enemy, 8, "破绽", battle);
-        battle.exposed = 2;
-        break;
-      case 2:
-        attack(enemy, 12, "余火", battle);
-        break;
-      case 3:
-        heal(target, 12, "净光");
-        break;
+    const restored = Math.min(16, hero.hp - player.life);
+    player.life += restored;
+    note(`治疗药剂恢复了 ${restored} 点生命。`);
+    tone("potion");
+  } else if (action === "skill" && player.energy) {
+    player.energy--;
+    const effect = skillEffect(hero, battle, enemyIntent(battle));
+    damageMultiplier = effect.multiplier;
+    attack(enemy, effect.damage, hero.skill);
+    if (enemy.life && effect.armorBreak) {
+      enemy.armor -= effect.armorBreak;
+      note(`余火烧开了护甲，${enemy.name}失去 ${effect.armorBreak} 点护甲。`, true);
+    }
+    if (enemy.life && effect.interruptRound) {
+      battle.interruptRound = effect.interruptRound;
+      battle.interruptPenalty = hero.interruptPenalty;
+      note(`穿刺打断了${enemy.heavyName}，敌人改用仓促反击。`, true);
+      tone("interrupt");
     }
   } else {
     return;
   }
   if (!enemy.life) {
     game.battle = null;
-    for (const survivor of game.party) {
-      if (survivor.life) survivor.energy = Math.min(survivor.focus, survivor.energy + 1);
-    }
-    note(`击败${enemy.name}。存活队员各恢复 1 点专注。`, true);
-    if (enemy === game.enemies.at(-1)) note("守陵者的誓言消散了。去触碰北面的封印。", true);
+    const recovery = player.energy < hero.focus ? "恢复了 1 点专注。" : "";
+    player.energy = Math.min(hero.focus, player.energy + 1);
+    note(`击败${enemy.name}。${recovery}`, true);
+    if (enemy === game.enemies.at(-1)) note(game.mission.bossDefeated, true);
     tone("win");
     return;
   }
-  const next = game.party.findIndex((candidate, index) => index > actor && candidate.life > 0);
-  if (next < 0) retaliation(battle);
-  else battle.actor = next;
+  retaliation(battle, damageMultiplier);
 }
 
 function easeCamera() {
@@ -368,7 +404,7 @@ function easeCamera() {
 }
 
 function dispatch(action) {
-  if (game.ended || modalOptions.length) return;
+  if (!game || game.ended || modalOptions.length) return;
   if (game.battle) {
     battleAction(action);
   } else if (action === "left" || action === "right") {
@@ -388,6 +424,7 @@ function dispatch(action) {
       startBattle(enemy);
     } else if (solid(x, y)) {
       if (tile(x, y) === "D") describe("墓窟铁门", "面向铁门后按 F，看看锁孔和门上的印记。");
+      else if (floodedAt(x, y)) describe("淹没的通道", "水没过了头顶。西侧泵房的闸轮可以排水。");
       else tone("wall");
     } else {
       if (motion) {
@@ -403,19 +440,30 @@ function dispatch(action) {
     }
     easeCamera();
   }
-  update();
+  updateCheckpoint();
 }
 
 function goal() {
-  if (game.ended) return [game.party.some((member) => member.life) ? "封印已重燃" : "远征结束", "可以从石门入口重新出发。"];
+  if (game.ended) return [game.player.life ? game.mission.successTitle : "远征结束", "返回灰鸦镇继续整备。"];
+  if (game.mission.id === "mine") {
+    if (!game.used.has("drain")) return ["找到排水闸轮", "从入井栈道绕向西侧泵房，降低水位。"];
+    if (game.enemies.at(-1).life) return ["击败沉钟矿监", "穿过已排水的北侧通道。矿监举起铁镐后，准备挡住重击。"];
+    return ["敲响井铃", "继续向北，面向井铃互动。"];
+  }
   if (!game.used.has("key")) return ["寻找黄铜钥匙", "沿墓道向北，在西侧墓室寻找守火人的遗匣。"];
   if (!game.used.has("riddle")) return ["解开三印石台", "找到通往东厅的路，留意遗匣里那张烧焦的纸。"];
   if (!game.door) return ["打开墓窟铁门", "用黄铜钥匙开启东厅北面的铁门。"];
-  if (game.enemies.at(-1).life) return ["击败灰誓守陵者", "守陵者在铁门后的墓室。留意它的横扫预告。"];
+  if (game.enemies.at(-1).life) return ["击败灰誓守陵者", "守陵者在铁门后的墓室。看到重斩预告时可以举盾。"];
   return ["触碰余烬封印", "朝墓室最北端前进，面向封印互动。"];
 }
 
 function areaName() {
+  if (game.mission.id === "mine") {
+    if (game.y <= 4) return "北侧采掘厅";
+    if (game.y <= 8 && game.x <= 3) return "西侧泵房";
+    if (game.y <= 8 && game.x >= 11) return "东侧工具巷";
+    return game.y >= 11 ? "入井栈道" : "旧轨道";
+  }
   if (game.y <= 4 && game.x >= 9) return "灰誓墓室";
   if (game.x >= 12 && game.y >= 9) return "圣龛侧廊";
   if (game.x >= 8) return "东厅";
@@ -429,39 +477,63 @@ function update() {
   $("#goal-detail").textContent = detail;
   $("#area").textContent = areaName();
   $("#compass").textContent = headings[game.facing];
+  const { battle, player, hero } = game;
   $("#supplies").textContent = `药剂 ×${game.potions}${game.sword ? "　·　守火人之刃" : ""}`;
+  $("#supplies").title = hero.equipment.map((item) => item.name).join(" / ");
   $("#step-count").textContent = `${game.steps} 步`;
-  const battle = game.battle;
   $("#encounter").hidden = !battle;
   $("#explore-actions").hidden = Boolean(battle);
   $("#battle-actions").hidden = !battle;
   $("#mode").textContent = battle ? `第 ${battle.round} 回合` : "探索";
   if (battle) {
-    const actor = game.party[battle.actor];
-    $("#enemy-name").textContent = battle.enemy.name;
-    $("#enemy-life").textContent = `${battle.enemy.life} / ${battle.enemy.hp}`;
-    $(".enemy-meter i").style.width = `${battle.enemy.life / battle.enemy.hp * 100}%`;
-    $("#mode-detail").textContent = `${actor.name}行动 · ${actor.description}`;
-    $("#prompt").textContent = battle.enemy === game.enemies.at(-1) && battle.round % 2 === 0
-      ? "守陵者拖起长刃 · 本回合将横扫全队" : "选择行动 · 全队行动后敌人反击";
-    $("[data-action=skill]").disabled = !actor.energy || (battle.actor === 3 && !injuredMember());
-    $("[data-action=potion]").disabled = !game.potions || !injuredMember();
+    const { enemy } = battle;
+    $("#enemy-name").textContent = enemy.name;
+    $("#enemy-life").textContent = `${enemy.life} / ${enemy.hp}`;
+    $(".enemy-meter i").style.width = `${enemy.life / enemy.hp * 100}%`;
+    $("#enemy-armor").hidden = enemy.armor === undefined;
+    $("#enemy-armor").textContent = enemy.armor ? `护甲 ${enemy.armor} · 减免物理伤害` : "护甲已破";
+    const intent = enemyIntent(battle);
+    const effect = skillEffect(hero, battle, intent);
+    let bonus = "";
+    if (effect.interruptRound) bonus = ` · 打断${enemy.heavyName}`;
+    else if (effect.armorBreak) bonus = ` · 破甲 ${effect.armorBreak}`;
+    else if (hero.heavyBlock && intent.damage) bonus = ` · 承伤 ${Math.ceil(intent.damage * effect.multiplier)}`;
+    const skillPreview = player.energy ? `${hero.skill} ${effect.damage}${bonus}` : `${hero.skill}专注不足`;
+    $("#mode-detail").textContent = `普攻 ${basicAttackDamage(hero, enemy)} · ${skillPreview}`;
+    $("#prompt").dataset.intent = intent.kind;
+    if (intent.kind === "charge") {
+      $("#prompt").textContent = `蓄力 · 本回合不攻击 · 下回合${enemy.heavyName} ${enemy.heavyDamage} 伤害`;
+    } else if (intent.kind === "staggered") {
+      $("#prompt").textContent = `重击已打断 · 仓促反击 ${intent.damage} 伤害`;
+    } else {
+      $("#prompt").textContent = `${intent.name} ${intent.damage} 伤害 · 防御后承伤 ${Math.ceil(intent.damage / 3)}`;
+    }
+    $("[data-action=skill]").disabled = !player.energy;
+    $("[data-action=potion]").disabled = !game.potions || player.life === hero.hp;
   } else {
+    delete $("#prompt").dataset.intent;
     const [x, y] = ahead();
     const nearby = enemyAt(x, y) ?? landmarkAt(x, y) ?? landmarkAt(game.x, game.y);
     const gate = tile(x, y) === "D" && !game.door;
     $("#mode-detail").textContent = "朝向目标后互动";
-    $("#prompt").textContent = game.ended ? "" : nearby ? `F · ${nearby.title ?? nearby.name}` : gate ? "F · 墓窟铁门" : "";
+    $("#prompt").textContent = game.ended ? "" : nearby ? `F · ${nearby.title ?? nearby.name}` :
+      gate ? "F · 墓窟铁门" : floodedAt(x, y) ? "积水挡住了通道" : "";
   }
-  for (const [index, member] of game.party.entries()) {
-    const panel = actorPanels[index];
-    panel.card.classList.toggle("active", battle?.actor === index);
-    panel.card.classList.toggle("fallen", !member.life);
-    panel.life.textContent = `${member.life}/${member.hp}`;
-    panel.focus.textContent = `${member.energy}/${member.focus}`;
-    panel.lifeBar.style.width = `${member.life / member.hp * 100}%`;
-    panel.focusBar.style.width = `${member.energy / member.focus * 100}%`;
+  $("#player-card").classList.toggle("active", Boolean(battle));
+  $("#player-card").classList.toggle("fallen", !player.life);
+  $("#player-life .stat-value").textContent = `${player.life}/${hero.hp}`;
+  $("#player-focus .stat-value").textContent = `${player.energy}/${hero.focus}`;
+  $("#player-life b").style.width = `${player.life / hero.hp * 100}%`;
+  $("#player-focus b").style.width = `${player.energy / hero.focus * 100}%`;
+  const firstFight = !game.enemies.some((enemy) => enemy.life === 0);
+  let tip = "";
+  if (!game.ended && battle && firstFight && battle.round <= 2) {
+    tip = "看敌人的行动预告再选招。防御会减伤并恢复专注，药剂留到受伤后再用。";
+  } else if (!game.ended && !battle && game.steps < 3) {
+    tip = "沿着火光向前，朝向门、宝箱或机关后按 F 或点「互动」。任务进度见「当前目标」。";
   }
+  $("#field-guide").hidden = !tip;
+  $("#field-guide-copy").textContent = tip;
   const records = game.logs.map(({ copy, emphasis }) => {
     const row = document.createElement("li");
     row.textContent = copy;
@@ -473,6 +545,7 @@ function update() {
 }
 
 function drawMap() {
+  const { layout } = game.mission;
   const size = 14;
   const left = 15;
   const top = 14;
@@ -482,7 +555,7 @@ function drawMap() {
     for (let x = 0; x < layout[y].length; x++) {
       const id = key(x, y);
       const seen = game.seen.has(id);
-      map.fillStyle = !seen ? "#151d16" : solid(x, y) ? "#343d30" : game.visited.has(id) ? "#57624c" : "#3b4938";
+      map.fillStyle = !seen ? "#151d16" : floodedAt(x, y) ? "#396468" : wallAt(x, y) ? "#343d30" : game.visited.has(id) ? "#57624c" : "#3b4938";
       map.fillRect(left + x * size, top + y * size, size - 1, size - 1);
       if (!seen) continue;
       if (tile(x, y) === "D" && !game.door) map.fillStyle = "#d6a75c";
@@ -504,34 +577,61 @@ function drawMap() {
   $("#map-count").textContent = `${game.visited.size} 格走过`;
 }
 
+const soundCues = {
+  // Delay, start pitch, end pitch, duration, waveform and peak gain.
+  step: [[0, 75, 45, .065, "triangle", .05]],
+  wall: [[0, 78, 50, .075, "square", .025]],
+  hit: [[0, 105, 55, .105, "triangle", .10]],
+  hurt: [[.045, 67, 39, .14, "sawtooth", .044]],
+  encounter: [[0, 112, 62, .22, "triangle", .072]],
+  heavy: [[.035, 91, 34, .23, "triangle", .125], [.06, 44, 31, .16, "square", .022]],
+  charge: [[.1, 103, 156, .14, "triangle", .062], [.23, 150, 178, .17, "sine", .055]],
+  interrupt: [[.06, 420, 132, .16, "triangle", .073]],
+  potion: [[0, 318, 490, .13, "sine", .08], [.075, 440, 570, .15, "sine", .063]],
+  mechanism: [[0, 126, 54, .2, "triangle", .088], [.12, 331, 180, .12, "square", .024]],
+  recruit: [[0, 294, 293, .14, "sine", .063], [.105, 392, 392, .19, "sine", .073]],
+  equip: [[0, 570, 284, .105, "triangle", .07], [.085, 780, 392, .17, "sine", .053]],
+  depart: [[0, 147, 105, .18, "triangle", .06], [.14, 88, 51, .19, "sine", .072]],
+  win: [[0, 365, 486, .19, "sine", .076], [.12, 482, 583, .2, "sine", .063]],
+};
+
 function tone(type) {
-  if (!sound) return;
-  const notes = {
-    hit: [105, 55, .105, "triangle", .12], hurt: [67, 39, .16, "sawtooth", .055],
-    win: [365, 520, .22, "sine", .12], step: [75, 45, .065, "triangle", .05],
-    wall: [78, 50, .075, "square", .025],
-  };
-  const [start, end, duration, wave, volume] = notes[type];
-  const oscillator = audio.createOscillator();
-  const gain = audio.createGain();
+  if (!sound || audio.state !== "running") return;
   const now = audio.currentTime;
-  oscillator.type = wave;
-  oscillator.frequency.setValueAtTime(start, now);
-  oscillator.frequency.exponentialRampToValueAtTime(end, now + duration);
-  gain.gain.setValueAtTime(volume, now);
-  gain.gain.exponentialRampToValueAtTime(.001, now + duration);
-  oscillator.connect(gain).connect(audio.destination);
-  oscillator.start(now);
-  oscillator.stop(now + duration);
+  for (const [delay, from, to, duration, wave, volume] of soundCues[type]) {
+    const start = now + delay;
+    const oscillator = audio.createOscillator();
+    const gain = audio.createGain();
+    oscillator.type = wave;
+    oscillator.frequency.setValueAtTime(from, start);
+    oscillator.frequency.exponentialRampToValueAtTime(to, start + duration);
+    gain.gain.setValueAtTime(.001, start);
+    gain.gain.linearRampToValueAtTime(volume, start + .008);
+    gain.gain.exponentialRampToValueAtTime(.001, start + duration);
+    oscillator.connect(gain).connect(audio.destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration);
+  }
 }
 
 function showHelp() {
-  if (modalOptions.length) return;
-  openModal("远征手册", "怎么进地窟", "W / ↑ 前进，S / ↓ 后退，A / D 横移。\nQ / ← 左转，E / → 右转，F / 空格互动。\n\n战斗中用 1–4 行动。战技消耗专注，防御减伤并回复专注。治疗会优先照顾生命比例最低的存活队员。也可以直接点下方按钮。", [
+  if (!game || modalOptions.length) return;
+  openModal("远征手册", "怎么进地窟", "W / ↑ 前进，S / ↓ 后退，A / D 横移。\nQ / ← 左转，E / → 右转，F / 空格互动。\n触屏可直接点移动、转向和互动按钮。\n\n战斗中用 1–4 行动。查看敌人预告和控制栏的伤害。盾击挡重击，穿刺打断蓄力，余火无视并削弱护甲。防御回复专注，药剂最多恢复 16 点生命。", [
     ["返回", () => closeModal()],
-    ["重新开始", () => openModal("重置远征", "回到石门入口？", "本次远征的进度会清空。", [
+    ["重新开始", () => openModal("重置远征", "回到本关入口？", "本次远征的进度会清空。", [
       ["继续当前远征", () => closeModal()],
-      ["重新开始", freshGame],
+      ["重新开始", () => freshGame(game.mission, game.hero)],
+    ])],
+    ["保存并返回营地", () => {
+      updateCheckpoint();
+      showCamp("远征已暂停，可从原处继续。");
+    }],
+    ["结束远征", () => openModal("结束远征", "返回灰鸦镇？", "本次地牢探索进度会清空，并记录为撤退。", [
+      ["继续远征", () => closeModal()],
+      ["返回营地", () => {
+        camp.settleExpedition(expeditionSave.capture(game), "retreat");
+        showCamp();
+      }],
     ])],
   ]);
 }
@@ -543,8 +643,12 @@ $("#sound").addEventListener("click", async () => {
   if (!sound) {
     const Audio = window.AudioContext ?? window.webkitAudioContext;
     if (!Audio) return;
-    audio ??= new Audio();
-    await audio.resume();
+    try {
+      audio ??= new Audio();
+      await audio.resume();
+    } catch {
+      return;
+    }
   }
   sound = !sound;
   $("#sound").setAttribute("aria-pressed", String(sound));
@@ -558,7 +662,7 @@ const keyboard = {
   1: "attack", 2: "skill", 3: "guard", 4: "potion",
 };
 document.addEventListener("keydown", (event) => {
-  if (event.altKey || event.ctrlKey || event.metaKey) return;
+  if (!game || event.altKey || event.ctrlKey || event.metaKey) return;
   if (modalOptions.length) {
     if (event.key === "Escape" && !game.ended) closeModal();
     if (event.key === "Tab") {
@@ -630,6 +734,23 @@ function makeTexture(kind) {
             : row === 15 || seam === 31 ? 52 : 80 + offset + broad;
         const moss = (hash(x >> 3, y >> 2, 8) % 5 === 0 && row > 8) ? 10 : 0;
         color = [base + grit + noise + 7 - moss, base + grit + noise + 6, base + grit + noise - 4 - moss];
+      } else if (kind === "mine") {
+        const ridge = (x + y * 2 + (hash(y >> 3, 4) % 6)) % 29;
+        const fissure = (ridge < 2 && hash(x >> 4, y >> 3, 28) % 5 !== 0) || (y + (x >> 2)) % 21 === 0;
+        const shelf = (hash(x >> 4, y >> 3, 13) % 22) - 11;
+        const base = (fissure ? 34 : ridge < 4 ? 86 : 63 + shelf) + grit + noise;
+        color = [base - 4, base + 5, base + 9];
+      } else if (kind === "water") {
+        const wave = (y + ((x >> 3) % 3)) % 16;
+        const glint = wave < 2 && (hash(x >> 2, y >> 4, 17) % 4 !== 0);
+        const base = (glint ? 96 : wave < 4 ? 65 : 46) + broad + (noise >> 1);
+        color = [base >> 1, base + 13, base + 21];
+      } else if (kind === "rail") {
+        const rail = Math.min(Math.abs(x - 17), Math.abs(x - 46));
+        const tie = x > 8 && x < 56 && y % 32 < 7;
+        const base = 54 + broad + (noise >> 1);
+        color = rail <= 2 ? [90 + noise, 85 + noise, 72 + noise] :
+          rail === 3 ? [39, 35, 30] : tie ? [base + 11, base - 3, base - 11] : [base + 1, base + 5, base - 1];
       } else if (kind === "door") {
         const band = y >= 10 && y <= 14 || y >= 42 && y <= 46;
         const rivet = band && y % 32 === 12 && x % 13 === 5;
@@ -649,18 +770,22 @@ function makeTexture(kind) {
 }
 
 const stone = makeTexture("stone");
+const mineStone = makeTexture("mine");
 const iron = makeTexture("door");
 const floor = makeTexture("floor");
+const water = makeTexture("water");
+const rails = makeTexture("rail");
 const ceiling = makeTexture("ceiling");
-const lightField = Array.from({ length: layout.length }, (_, y) =>
-  Array.from({ length: layout[y].length }, (_, x) => {
+
+function buildLightField({ layout, torches }) {
+  return layout.map((row, y) => Array.from(row, (_, x) => {
     let light = 0;
     for (const [tx, ty] of torches) {
       light = Math.max(light, Math.max(0, 1 - Math.hypot(x + .5 - tx, y + .5 - ty) / 3.1));
     }
     return light;
-  })
-);
+  }));
+}
 
 function shaded(color, light, warmth) {
   const r = Math.min(255, (color & 255) * (light + warmth * .28) + 4);
@@ -669,7 +794,11 @@ function shaded(color, light, warmth) {
   return ink(r, g, b);
 }
 
-function drawSurfaces(dx, dy, rx, ry, flicker) {
+function drawSurfaces(dx, dy, rx, ry, flicker, now) {
+  const { lightField, mission } = game;
+  const inMine = mission.id === "mine";
+  const waterVisible = inMine && !game.used.has("drain");
+  const ripple = Math.floor(now / 145) & 63;
   for (let y = 0; y < height; y++) {
     const under = y >= height / 2;
     const depth = focal * (under ? .51 : .49) / Math.abs(y + .5 - height / 2);
@@ -686,7 +815,13 @@ function drawSurfaces(dx, dy, rx, ry, flicker) {
       const tx = ((fx - gx) * 64) & 63;
       const ty = ((fy - gy) * 64) & 63;
       const light = attenuation * (under ? .46 + torch * .39 : .25 + torch * .31) + .09;
-      pixelData[y * width + x] = shaded(source[ty * 64 + tx], light, torch * attenuation);
+      const ground = under && inMine ? mission.layout[gy]?.[gx] : null;
+      if (waterVisible && ground === "~") {
+        pixelData[y * width + x] = shaded(water[((ty + ripple) & 63) * 64 + tx], light + attenuation * .23, 0);
+      } else {
+        const texture = ground === "r" ? rails : source;
+        pixelData[y * width + x] = shaded(texture[ty * 64 + tx], light, torch * attenuation);
+      }
       fx += stepX;
       fy += stepY;
     }
@@ -694,6 +829,8 @@ function drawSurfaces(dx, dy, rx, ry, flicker) {
 }
 
 function drawWalls(dx, dy, rx, ry, flicker) {
+  const wallTexture = game.mission.id === "mine" ? mineStone : stone;
+  const { lightField } = game;
   for (let x = 0; x < width; x++) {
     const across = (x + .5 - width / 2) / focal;
     const rayX = dx + rx * across;
@@ -719,10 +856,10 @@ function drawWalls(dx, dy, rx, ry, flicker) {
         depth = nextY;
         nextY += deltaY;
       }
-    } while (!solid(gx, gy));
+    } while (!wallAt(gx, gy));
     depth = Math.max(.03, depth);
     depths[x] = depth;
-    const source = tile(gx, gy) === "D" ? iron : stone;
+    const source = tile(gx, gy) === "D" ? iron : wallTexture;
     const point = side ? camera.y + depth * rayY : camera.x + depth * rayX;
     const texX = ((point - Math.floor(point)) * 64) & 63;
     const length = focal / depth;
@@ -815,12 +952,12 @@ function buildPortal() {
   });
 }
 
-function buildEnemy(armored) {
+function buildEnemy(armored, miner = false) {
   return sprite(108, 143, (p) => {
     const draw = (color, points) => polygon(p, color, points);
-    const metal = armored ? "#70634f" : "#8c8872";
-    const edge = armored ? "#a78b61" : "#beb496";
-    const shade = armored ? "#4b4437" : "#4e5146";
+    const metal = miner ? "#627273" : armored ? "#70634f" : "#8c8872";
+    const edge = miner ? "#90a1a0" : armored ? "#a78b61" : "#beb496";
+    const shade = miner ? "#394848" : armored ? "#4b4437" : "#4e5146";
     draw("#151812b0", [[10, 128], [31, 117], [82, 116], [103, 129], [88, 138], [32, 140]]);
     draw("#171b16", [[40, 42], [70, 37], [86, 64], [78, 91], [84, 125], [73, 132], [57, 116], [56, 86], [50, 106], [43, 129], [23, 129], [29, 106], [30, 69]]);
     if (armored) {
@@ -850,11 +987,18 @@ function buildEnemy(armored) {
     draw(shade, [[71, 39], [81, 46], [84, 63], [96, 72], [93, 81], [77, 75], [70, 58]]);
     draw(metal, [[74, 43], [80, 48], [81, 62], [92, 70], [88, 75], [77, 70], [72, 56]]);
     draw("#282720", [[86, 73], [91, 67], [98, 76], [94, 85]]);
-    draw("#635341", [[89, 86], [83, 71], [85, 67], [101, 74], [100, 79], [95, 80]]);
-    draw("#b4aa89", [[90, 78], [98, 80], [98, 109], [93, 134], [87, 114]]);
-    draw("#665f52", [[93, 82], [96, 83], [96, 107], [93, 128]]);
+    if (miner) {
+      draw("#513a29", [[87, 113], [91, 50], [97, 51], [94, 116]]);
+      draw("#aa8860", [[88, 109], [92, 53], [94, 54], [90, 109]]);
+      draw("#282b27", [[71, 56], [79, 44], [93, 41], [103, 46], [107, 55], [95, 52], [85, 53]]);
+      draw("#98a29b", [[73, 53], [81, 46], [93, 43], [102, 47], [93, 46], [83, 49]]);
+    } else {
+      draw("#635341", [[89, 86], [83, 71], [85, 67], [101, 74], [100, 79], [95, 80]]);
+      draw("#b4aa89", [[90, 78], [98, 80], [98, 109], [93, 134], [87, 114]]);
+      draw("#665f52", [[93, 82], [96, 83], [96, 107], [93, 128]]);
+      if (armored) draw("#c17946", [[88, 96], [90, 102], [93, 96], [95, 99], [94, 111], [91, 119], [87, 113]]);
+    }
     if (armored) {
-      draw("#c17946", [[88, 96], [90, 102], [93, 96], [95, 99], [94, 111], [91, 119], [87, 113]]);
       draw("#432e26", [[38, 32], [38, 18], [45, 10], [45, 4], [50, 10], [63, 10], [71, 3], [70, 17], [73, 28], [63, 40], [47, 40]]);
       draw(metal, [[42, 17], [51, 12], [65, 13], [68, 20], [64, 27], [65, 34], [56, 39], [45, 33], [42, 28]]);
       draw(edge, [[42, 18], [50, 13], [60, 14], [63, 18], [54, 20], [48, 24], [43, 23]]);
@@ -870,6 +1014,12 @@ function buildEnemy(armored) {
     p.fillStyle = armored ? "#f0a05c" : "#c2dc8f";
     p.fillRect(46, 26, 3, 2);
     p.fillRect(59, 25, 3, 2);
+    if (miner) {
+      p.fillStyle = "#a77647";
+      p.fillRect(49, 13, 12, 8);
+      p.fillStyle = "#ffe3a2";
+      p.fillRect(52, 14, 6, 5);
+    }
     for (let i = 0; i < 50; i++) {
       const x = 38 + hash(i, 2, 8) % 32;
       const y = 42 + hash(i, 1, 6) % 36;
@@ -879,15 +1029,14 @@ function buildEnemy(armored) {
   });
 }
 
-function buildPortrait(art) {
+function buildPortrait(id) {
   const palettes = {
     guard: ["#42483d", "#879084", "#b1b49a", "#665a45", "#b68c66"],
     scout: ["#34483a", "#587256", "#7f9567", "#665449", "#ba9876"],
     mage: ["#413952", "#69627d", "#9687a2", "#5a4847", "#bda28e"],
-    priest: ["#3d5350", "#638883", "#a6b9a4", "#665047", "#c3a084"],
   };
-  const [shadow, cloth, trim, skinShadow, skin] = palettes[art];
-  return sprite(32, 42, (p) => {
+  const [shadow, cloth, trim, skinShadow, skin] = palettes[id];
+  const portrait = sprite(32, 42, (p) => {
     p.fillStyle = "#242a21";
     p.fillRect(0, 0, 32, 42);
     p.fillStyle = "#30382a";
@@ -902,21 +1051,18 @@ function buildPortrait(art) {
     p.fillRect(20, 18, 2, 1);
     p.fillRect(17, 23, 3, 1);
     polygon(p, trim, [[5, 34], [10, 31], [16, 36], [20, 31], [27, 34], [28, 37], [23, 36], [16, 40], [9, 35]]);
-    if (art === "guard") {
+    if (id === "guard") {
       polygon(p, trim, [[9, 10], [14, 6], [21, 7], [24, 13], [22, 17], [14, 17], [12, 22], [9, 20]]);
       p.fillStyle = shadow;
       p.fillRect(13, 15, 10, 2);
-    } else if (art === "mage") {
+    } else if (id === "mage") {
       polygon(p, trim, [[4, 16], [9, 13], [16, 2], [23, 6], [21, 12], [28, 15], [27, 17], [18, 14], [10, 17]]);
       polygon(p, "#bbb49e", [[12, 20], [17, 25], [21, 22], [20, 29], [16, 34], [13, 29]]);
-    } else if (art === "priest") {
-      p.fillStyle = "#e0c890";
-      p.fillRect(16, 11, 4, 2);
-      p.fillRect(17, 10, 2, 4);
-      p.fillRect(15, 34, 5, 2);
-      p.fillRect(17, 32, 1, 7);
     }
   });
+  portrait.className = "portrait";
+  portrait.setAttribute("aria-hidden", "true");
+  return portrait;
 }
 
 function initArt() {
@@ -926,39 +1072,46 @@ function initArt() {
   drawables.portal = buildPortal();
   drawables.skeleton = buildEnemy(false);
   drawables.warden = buildEnemy(true);
+  drawables.miner = buildEnemy(true, true);
+  drawables.valve = sprite(72, 84, (p) => {
+    polygon(p, "#202d29", [[18, 76], [18, 65], [33, 61], [33, 28], [41, 28], [41, 61], [55, 65], [55, 76]]);
+    polygon(p, "#514639", [[17, 19], [26, 8], [47, 8], [57, 19], [57, 40], [46, 51], [26, 51], [17, 40]]);
+    polygon(p, "#a07a49", [[20, 20], [28, 11], [46, 11], [54, 20], [54, 38], [46, 47], [28, 47], [20, 38]]);
+    polygon(p, "#303a32", [[25, 22], [31, 16], [43, 16], [49, 22], [49, 36], [43, 42], [31, 42], [25, 36]]);
+    p.fillStyle = "#ba9158";
+    p.fillRect(25, 27, 24, 4);
+    p.fillRect(35, 16, 4, 26);
+    p.fillStyle = "#e0b472";
+    p.fillRect(34, 26, 7, 6);
+  });
+  drawables.bell = sprite(76, 113, (p) => {
+    polygon(p, "#302921", [[8, 105], [8, 18], [18, 8], [59, 8], [68, 18], [68, 105], [59, 105], [59, 22], [17, 22], [17, 105]]);
+    p.fillStyle = "#74654a";
+    p.fillRect(10, 22, 4, 80);
+    p.fillRect(18, 10, 40, 4);
+    polygon(p, "#a48145", [[30, 22], [45, 22], [50, 30], [52, 55], [58, 66], [56, 72], [20, 72], [18, 66], [24, 55], [27, 30]]);
+    polygon(p, "#d1a462", [[32, 24], [42, 24], [44, 30], [44, 52], [49, 63], [25, 63], [29, 53], [29, 31]]);
+    p.fillStyle = "#382b20";
+    p.fillRect(20, 67, 36, 4);
+    p.fillStyle = "#c49a58";
+    p.fillRect(34, 72, 7, 6);
+  });
   drawables.plaque = sprite(45, 55, (p) => {
     polygon(p, "#313a30", [[4, 6], [36, 2], [42, 7], [39, 48], [9, 51], [3, 42]]);
     polygon(p, "#6d735e", [[7, 8], [36, 5], [37, 42], [9, 46]]);
     polygon(p, "#363b31", [[18, 6], [21, 20], [17, 27], [23, 34], [21, 45], [26, 35], [20, 27], [25, 21], [22, 6]]);
   });
-  for (const member of roster) {
-    const card = document.createElement("div");
-    card.className = "member";
-    const portrait = buildPortrait(member.art);
-    portrait.className = "portrait";
-    portrait.setAttribute("aria-hidden", "true");
-    const info = document.createElement("div");
-    info.className = "member-info";
-    info.innerHTML = `<div class="member-name">${member.name}</div><div class="member-role">${member.role}</div>
-      <div class="stat" title="生命"><i><b></b></i><span></span></div>
-      <div class="stat focus" title="专注"><i><b></b></i><span></span></div>`;
-    card.append(portrait, info);
-    $("#party").append(card);
-    actorPanels.push({
-      card, life: card.querySelector(".stat span"), focus: card.querySelector(".focus span"),
-      lifeBar: card.querySelector(".stat b"), focusBar: card.querySelector(".focus b"),
-    });
-  }
 }
 
 function drawObjects(dx, dy, rx, ry, now) {
+  const { landmarks, torches } = game.mission;
   const items = [
     ...game.enemies.filter((enemy) => enemy.life > 0).map((enemy) => ({
-      image: drawables[enemy.art], x: enemy.x + .5, y: enemy.y + .5, size: enemy.art === "warden" ? .88 : .76, lift: 0,
+      image: drawables[enemy.art], x: enemy.x + .5, y: enemy.y + .5, size: enemy.art === "skeleton" ? .76 : .88, lift: 0,
     })),
     ...landmarks.filter((item) => !game.used.has(item.type)).map((item) => ({
       image: drawables[item.art], x: item.x + .5, y: item.y + .5,
-      size: { chest: .31, altar: .61, portal: .98, plaque: .45 }[item.art], lift: 0,
+      size: { chest: .31, altar: .61, portal: .98, plaque: .45, valve: .65, bell: .87 }[item.art], lift: 0,
     })),
     ...torches.map(([x, y], index) => ({
       image: drawables.torch[(Math.floor(now / 105) + index) % 4], x, y, size: .41, lift: .37,
@@ -1002,6 +1155,7 @@ vignette.addColorStop(1, "#080d0ac9");
 let lastFrame = -100;
 function frame(now) {
   requestAnimationFrame(frame);
+  if (!game) return;
   if (!motion && !flash && now - lastFrame < 74) return;
   lastFrame = now;
   if (motion) {
@@ -1015,7 +1169,7 @@ function frame(now) {
   const dx = Math.cos(camera.angle);
   const dy = Math.sin(camera.angle);
   const flicker = .98 + Math.sin(now / 110) * .08 + Math.cos(now / 241) * .04;
-  drawSurfaces(dx, dy, -dy, dx, flicker);
+  drawSurfaces(dx, dy, -dy, dx, flicker, now);
   drawWalls(dx, dy, -dy, dx, flicker);
   ctx.putImageData(pixels, 0, 0);
   ctx.imageSmoothingEnabled = false;
@@ -1036,5 +1190,6 @@ function frame(now) {
 }
 
 initArt();
-freshGame();
+camp.init(buildPortrait, freshGame, enterExpedition, tone);
+showCamp();
 requestAnimationFrame(frame);
