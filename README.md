@@ -1,5 +1,8 @@
 # 余烬地窟 · Ashen Vault
 
+[![Play Online](https://img.shields.io/badge/%E2%96%B6%20Play%20Online-GitHub%20Pages-d9a441?style=flat-square)](https://sjjsbxb.github.io/Underkeep/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-4c8bf5?style=flat-square)](LICENSE)
+
 一款纯前端、零依赖的第一人称地牢探索原型：在灰烬笼罩的墓窟中探索、标记、遭遇并与守卫者战斗。全部由原生 HTML / CSS / JavaScript 与 Canvas 2D 实现，无需构建步骤。
 
 > A zero-dependency, first-person dungeon-crawler prototype written in vanilla HTML/CSS/JS with a hand-rolled Canvas 2D renderer.
