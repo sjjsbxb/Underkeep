@@ -11,6 +11,7 @@
   <script src="missions.js" defer></script>
   <script src="expedition-save.js" defer></script>
   <script src="camp.js" defer></script>
+  <script src="combat-fx.js" defer></script>
   <script src="dungeon.js" defer></script>
 </head>
 <body>
@@ -73,14 +74,15 @@
               <svg viewBox="0 0 620 220" preserveAspectRatio="none" aria-hidden="true">
                 <path class="route-terrain" d="M-9 70 83 19l52 39 68-43 75 32 65-19 56 30 64-31 109 31 58-25v189H-9zM-9 146l104-30 92 37 105-24 65 49 125-59 100 26 45-14"/>
                 <path class="route-path" id="route-vault-path" d="M121 154q69-31 133-18t85-59q24-26 61-30"/>
-                <path class="route-path" id="route-mine-path" d="M121 154q92 21 181-3t174-21"/>
+                <path class="route-path" id="route-mine-path" d="M121 154q92 21 181 11t174 7"/>
+                <path class="route-path" id="route-cloister-path" d="M121 154q97-47 177-40t187-19"/>
               </svg>
               <span class="route-marker route-town"><b aria-hidden="true">◆</b>灰鸦镇</span>
               <div id="mission-options"></div>
             </div>
           </fieldset>
           <div class="prepare-sheet">
-            <div><p class="eyebrow">委托</p><p id="prepare-contract"></p><p id="prepare-reward"></p></div>
+            <div><p class="eyebrow">委托</p><p id="prepare-contract"></p><p id="prepare-reward"></p><p id="prepare-sidequest" hidden></p></div>
             <div><p class="eyebrow">出征英雄</p><p id="prepare-hero"></p><p id="prepare-equipment"></p><p>随身补给：治疗药剂 ×2</p></div>
           </div>
         </section>
@@ -99,6 +101,10 @@
             <h4>战利品与发现</h4>
             <ul id="report-loot"></ul>
             <p class="report-unlock" id="report-unlock" hidden></p>
+            <div class="report-ending" id="report-ending" hidden>
+              <h4>灰鸦镇的钟声</h4>
+              <p id="report-ending-copy"></p>
+            </div>
           </div>
         </section>
         <aside class="camp-roster" aria-labelledby="roster-title">
@@ -182,6 +188,7 @@
           <p class="eyebrow"><span>01</span> &nbsp; 当前目标</p>
           <h2 id="goal"></h2>
           <p id="goal-detail"></p>
+          <div class="sidequest" id="sidequest" hidden><h3>支线 · 找回矿工名册</h3><p id="sidequest-detail"></p></div>
         </section>
         <section class="panel map-panel">
           <div class="section-heading"><h2>探路图</h2><span id="map-count"></span></div>
@@ -194,7 +201,7 @@
         </section>
       </aside>
     </div>
-    <footer><span>ASHEN VAULT <b>◆</b> 原型 0.7</span><span id="footer-controls" hidden>WASD 移动 <b>·</b> Q / E 转向 <b>·</b> F 互动</span></footer>
+    <footer><span>ASHEN VAULT <b>◆</b> 原型 0.9</span><span id="footer-controls" hidden>WASD 移动 <b>·</b> Q / E 转向 <b>·</b> F 互动</span></footer>
   </main>
 </body>
 </html>

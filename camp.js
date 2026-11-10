@@ -8,13 +8,14 @@ const camp = (() => {
   };
   const gear = {
     blade: { name: "淬火短刃", slot: "weapon", icon: 0, stat: "attack", bonus: 2, price: 35 },
+    pick: { name: "矿工短镐", slot: "weapon", icon: 6, stat: "pierce", bonus: 3, effect: "普攻无视最多 3 点护甲", price: 30 },
     coat: { name: "锁环软甲", slot: "armor", icon: 1, stat: "hp", bonus: 8, price: 45 },
     charm: { name: "灰晶护符", slot: "trinket", icon: 2, stat: "focus", bonus: 1, price: 25 },
     shieldClasp: { name: "磐铁盾扣", slot: "technique", icon: 3, hero: "guard", stat: "heavyBlock", bonus: 20, effect: "盾击抵挡重击时额外减免 20 个百分点", price: 40 },
     snare: { name: "绊索扣", slot: "technique", icon: 4, hero: "scout", stat: "interruptPenalty", bonus: 3, effect: "成功打断后，敌人改用的反击再减少 3 伤害", price: 35 },
     ember: { name: "裂纹炭晶", slot: "technique", icon: 5, hero: "mage", stat: "armorBreak", bonus: 1, effect: "余火额外削掉 1 点护甲", price: 35 },
   };
-  const statNames = { attack: "攻击", hp: "生命", focus: "专注", heavyBlock: "盾击重击减免", interruptPenalty: "打断后减伤", armorBreak: "余火破甲" };
+  const statNames = { attack: "攻击", hp: "生命", focus: "专注", heavyBlock: "盾击重击减免", interruptPenalty: "打断后减伤", armorBreak: "余火破甲", pierce: "普攻穿甲" };
   const slotNames = { weapon: "武器", armor: "护甲", trinket: "饰品", technique: "战技配件" };
   const storageKey = "ashen-vault.camp";
   const get = (id) => document.getElementById(id);
@@ -31,19 +32,22 @@ const camp = (() => {
     return !mission.requires || cleared.includes(mission.requires);
   }
 
-  function readLoadout(raw, heroId) {
+  function gearAllowed(id, heroId, mineLedger) {
+    if (typeof id !== "string" || !Object.hasOwn(gear, id) || (id === "pick" && !mineLedger)) return false;
+    return !gear[id].hero || gear[id].hero === heroId;
+  }
+
+  function readLoadout(raw, heroId, mineLedger) {
     const loadout = {};
     for (const slot of Object.keys(slotNames)) {
       const id = raw?.[slot];
-      if (typeof id !== "string" || !Object.hasOwn(gear, id)) continue;
-      const item = gear[id];
-      if (item.slot === slot && (!item.hero || item.hero === heroId)) loadout[slot] = id;
+      if (gearAllowed(id, heroId, mineLedger) && gear[id].slot === slot) loadout[slot] = id;
     }
     return loadout;
   }
 
   function load() {
-    const initial = { version: 3, gold: 100, selected: "guard", roster: { guard: {} }, mission: "vault", cleared: [], expedition: null, report: null };
+    const initial = { version: 4, gold: 100, selected: "guard", roster: { guard: {} }, inventory: { guard: [] }, mission: "vault", cleared: [], mineLedger: false, expedition: null, report: null };
     try {
       savedText = localStorage.getItem(storageKey);
     } catch {
@@ -56,12 +60,18 @@ const camp = (() => {
     } catch {
       return initial;
     }
-    if (![1, 2, 3].includes(saved?.version) || !Number.isSafeInteger(saved.gold) || saved.gold < 0) return initial;
+    if (![1, 2, 3, 4].includes(saved?.version) || !Number.isSafeInteger(saved.gold) || saved.gold < 0) return initial;
     initial.gold = saved.gold;
+    initial.mineLedger = saved.version === 4 && saved.mineLedger === true &&
+      Array.isArray(saved.cleared) && saved.cleared.includes("vault") && saved.cleared.includes("mine");
     for (const id of Object.keys(heroes)) {
       const items = saved.roster?.[id];
       if (!items || typeof items !== "object") continue;
-      initial.roster[id] = readLoadout(items, id);
+      const loadout = readLoadout(items, id, initial.mineLedger);
+      const owned = saved.version === 4 ? saved.inventory?.[id] : null;
+      const extras = Array.isArray(owned) ? owned.filter((item) => gearAllowed(item, id, initial.mineLedger)) : [];
+      initial.roster[id] = loadout;
+      initial.inventory[id] = [...new Set([...extras, ...Object.values(loadout)])];
     }
     if (typeof saved.selected === "string" && Object.hasOwn(initial.roster, saved.selected)) initial.selected = saved.selected;
     if (saved.version >= 2 && Array.isArray(saved.cleared)) {
@@ -72,12 +82,12 @@ const camp = (() => {
         initial.mission = saved.mission;
       }
     }
-    if (saved.version === 3) {
+    if (saved.version >= 3) {
       const active = saved.expedition;
       if (typeof active?.mission === "string" && Object.hasOwn(missions, active.mission) &&
           typeof active.hero === "string" && Object.hasOwn(initial.roster, active.hero) &&
           isUnlocked(missions[active.mission], initial.cleared)) {
-        const restored = restoreExpedition(active);
+        const restored = restoreExpedition(active, initial.mineLedger);
         if (restored) initial.expedition = expeditionSave.capture(restored);
       }
       initial.report = readReport(saved.report);
@@ -102,14 +112,14 @@ const camp = (() => {
   }
 
   function profile(id = state.selected, loadout = state.roster[id]) {
-    const hero = { ...heroes[id], id, loadout: { ...loadout } };
+    const hero = { ...heroes[id], id, pierce: 0, loadout: { ...loadout } };
     hero.equipment = Object.values(loadout).map((itemId) => gear[itemId]);
     for (const item of hero.equipment) hero[item.stat] += item.bonus;
     return hero;
   }
 
-  function restoreExpedition(active) {
-    return expeditionSave.restore(active, missions[active.mission], profile(active.hero, readLoadout(active.loadout, active.hero)));
+  function restoreExpedition(active, mineLedger = state.mineLedger) {
+    return expeditionSave.restore(active, missions[active.mission], profile(active.hero, readLoadout(active.loadout, active.hero, mineLedger)));
   }
 
   function saveExpedition(snapshot) {
@@ -125,9 +135,10 @@ const camp = (() => {
     return {
       mission: raw.mission, hero: raw.hero, outcome: raw.outcome,
       reward: count(raw.reward), explored: count(raw.explored), kills: count(raw.kills),
-      found: Array.isArray(raw.found) ? ["key", "cache", "secret", "drain"].filter((item) => raw.found.includes(item)) : [],
+      found: Array.isArray(raw.found) ? ["key", "cache", "westCache", "secret", "drain", "ledger", "westLamp", "eastLamp"].filter((item) => raw.found.includes(item)) : [],
       unlocked: typeof raw.unlocked === "string" && Object.hasOwn(missions, raw.unlocked) ? raw.unlocked : null,
       pending: raw.pending === true,
+      pickUnlocked: raw.pickUnlocked === true,
     };
   }
 
@@ -179,6 +190,11 @@ const camp = (() => {
       stat.textContent = `${label} ${value}`;
       stats.append(stat);
     }
+    if (hero.pierce) {
+      const pierce = document.createElement("span");
+      pierce.textContent = `普攻穿甲 ${hero.pierce}`;
+      stats.append(pierce);
+    }
     const skill = document.createElement("p");
     skill.className = "camp-hero-gear";
     skill.textContent = skillDescription(hero);
@@ -190,7 +206,7 @@ const camp = (() => {
     equipment.textContent = names.join(" / ");
     get("hero-detail").replaceChildren(stats, skill, equipment);
     get("prepare-hero").textContent = `${hero.name} · ${hero.role} · 生命 ${hero.hp} / 攻击 ${hero.attack} / 专注 ${hero.focus}`;
-    get("prepare-equipment").textContent = `装备：${names.join(" / ")}`;
+    get("prepare-equipment").textContent = `装备：${names.join(" / ")}${hero.pierce ? ` · 普攻穿甲 ${hero.pierce}` : ""}`;
   }
 
   function stockRow(art, name, description, button, comparison) {
@@ -222,6 +238,7 @@ const camp = (() => {
         if (Object.hasOwn(state.roster, id) || state.gold < hero.price) return;
         state.gold -= hero.price;
         state.roster[id] = {};
+        state.inventory[id] = [];
         state.selected = id;
         save();
         playCue("recruit");
@@ -239,18 +256,25 @@ const camp = (() => {
     const heroId = recipient;
     const target = state.roster[heroId];
     const hero = profile(heroId);
-    const rows = Object.entries(gear).filter(([, item]) => !item.hero || item.hero === heroId).map(([id, item]) => {
+    const owned = state.inventory[heroId];
+    const rows = Object.entries(gear).filter(([id]) => gearAllowed(id, heroId, state.mineLedger)).map(([id, item]) => {
       const art = document.createElement("span");
       art.className = "camp-stock-icon";
-      art.style.setProperty("--gear-icon", `${item.icon * 20}%`);
+      art.style.setProperty("--gear-icon", `${item.icon * 100 / 6}%`);
       art.setAttribute("aria-hidden", "true");
       const button = document.createElement("button");
-      button.textContent = target[item.slot] ? "已装备" : state.gold < item.price ? `缺 ${item.price - state.gold} 金` : `购买 · ${item.price} 金`;
-      button.disabled = Boolean(target[item.slot]) || state.gold < item.price;
-      button.setAttribute("aria-label", target[item.slot] ? `已装备${item.name}` : `购买${item.name}，${item.price} 金币`);
+      const equipped = target[item.slot] === id;
+      const hasItem = owned.includes(id);
+      button.textContent = equipped ? "已装备" : hasItem ? "装备" : state.gold < item.price ? `缺 ${item.price - state.gold} 金` : `购买 · ${item.price} 金`;
+      button.disabled = equipped || (!hasItem && state.gold < item.price);
+      button.setAttribute("aria-label", equipped ? `已装备${item.name}` : hasItem ? `装备${item.name}` : `购买${item.name}，${item.price} 金币`);
       button.addEventListener("click", () => {
-        if (target[item.slot] || state.gold < item.price) return;
-        state.gold -= item.price;
+        if (target[item.slot] === id) return;
+        if (!owned.includes(id)) {
+          if (state.gold < item.price) return;
+          state.gold -= item.price;
+          owned.push(id);
+        }
         target[item.slot] = id;
         save();
         playCue("equip");
@@ -260,11 +284,15 @@ const camp = (() => {
         announce(`${heroes[heroId].name}已装备${item.name}。`);
       });
       const slot = slotNames[item.slot];
-      const before = hero[item.stat];
-      const unit = item.stat === "heavyBlock" ? "%" : "";
-      const values = target[item.slot] ? `${before}${unit}（当前）` : `${before}${unit} → ${before + item.bonus}${unit}`;
+      const next = profile(heroId, { ...target, [item.slot]: id });
+      const stats = item.slot === "weapon" && state.mineLedger ? ["attack", "pierce"] : [item.stat];
+      const comparison = stats.map((stat) => {
+        const unit = stat === "heavyBlock" ? "%" : "";
+        const values = equipped ? `${hero[stat]}${unit}（当前）` : `${hero[stat]}${unit} → ${next[stat]}${unit}`;
+        return `${statNames[stat]} ${values}`;
+      }).join(" · ");
       const description = item.effect ? `${slot} · ${item.effect}` : slot;
-      return stockRow(art, item.name, description, button, `${statNames[item.stat]} ${values}`);
+      return stockRow(art, item.name, description, button, comparison);
     });
     get("camp-stock").replaceChildren(...rows);
   }
@@ -275,7 +303,7 @@ const camp = (() => {
     get("camp-facility").dataset.place = screen;
     get("facility-kicker").textContent = inShop ? "Ⅱ / THE FORGE" : "Ⅰ / THE TAVERN";
     get("facility-title").textContent = inShop ? "余火铁匠铺" : "断杯酒馆";
-    const shopIntro = state.expedition ? "先选装备的归属。暂停中的远征会沿用出发时的装备。" : "先选英雄，再比较购买前后的属性。买下后立即装备。";
+    const shopIntro = state.expedition ? "暂停中的远征会沿用出发时的装备。换装会在下次出征生效。" : "先选英雄，再比较属性。买下后立即装备，已拥有的物品可免费换装。";
     get("facility-intro").textContent = inShop ? shopIntro : "酒馆里的佣兵愿意为金币下墓。招募后可在名册里选择出征的人。";
     get("shop-recipient").hidden = !inShop;
     if (inShop) {
@@ -292,6 +320,8 @@ const camp = (() => {
     const mission = missions[state.mission];
     get("prepare-title").textContent = mission.title;
     get("prepare-contract").textContent = `${mission.chapter} · ${mission.contract}`;
+    get("prepare-sidequest").hidden = mission.id !== "mine";
+    get("prepare-sidequest").textContent = state.mineLedger ? "支线已完成 · 找回矿工名册" : "可选支线 · 在东侧工具巷找回矿工名册";
     const cleared = state.cleared.includes(mission.id);
     get("prepare-reward").textContent = cleared ? `重访报酬 ${mission.repeatReward} 金币` : `首次通关 ${mission.firstReward} 金币`;
   }
@@ -314,7 +344,8 @@ const camp = (() => {
       const name = document.createElement("strong");
       name.textContent = mission.title;
       const status = document.createElement("small");
-      status.textContent = input.disabled ? "通关墓窟后解锁" : state.cleared.includes(mission.id) ? "已通关" : "可出征";
+      status.textContent = input.disabled ? `通关${mission.requires === "vault" ? "墓窟" : "矿井"}后解锁` :
+        state.cleared.includes(mission.id) ? "已通关" : "可出征";
       label.append(input, name, status);
       return label;
     });
@@ -333,8 +364,12 @@ const camp = (() => {
     const discoveries = {
       key: "守火人的遗匣：黄铜钥匙、治疗药剂 ×1",
       cache: "补给箱：治疗药剂 ×2",
+      westCache: "抄经台补给匣：治疗药剂 ×1",
       secret: "暗格：守火人之刃（本次远征）",
       drain: "排水闸轮：抽干了矿井积水",
+      ledger: report.outcome === "won" ? "矿工名册已交给铁匠" : "找到矿工名册（远征未完成）",
+      westLamp: "点亮余烬壁灯，打开西侧抄经廊",
+      eastLamp: "点亮寒银壁灯，打开东侧回声廊",
     };
     const items = report.found.length ? report.found.map((item) => discoveries[item]) : ["此次远征没有额外发现。"];
     get("report-loot").replaceChildren(...items.map((item) => {
@@ -342,8 +377,14 @@ const camp = (() => {
       li.textContent = item;
       return li;
     }));
-    get("report-unlock").hidden = !report.unlocked;
-    get("report-unlock").textContent = report.unlocked ? `新委托已开放 · ${missions[report.unlocked].title}` : "";
+    const unlocks = [];
+    if (report.pickUnlocked) unlocks.push("支线完成 · 矿工短镐已入库，可到铁匠铺换装");
+    if (report.unlocked) unlocks.push(`新委托已开放 · ${missions[report.unlocked].title}`);
+    get("report-unlock").hidden = !unlocks.length;
+    get("report-unlock").textContent = unlocks.join("。");
+    const ending = report.outcome === "won" && mission.ending;
+    get("report-ending").hidden = !ending;
+    get("report-ending-copy").textContent = ending || "";
   }
 
   function setScreen(next) {
@@ -439,6 +480,7 @@ const camp = (() => {
     const mission = missions[snapshot.mission];
     let reward = 0;
     let unlocked = null;
+    let pickUnlocked = false;
     if (outcome === "won") {
       const firstClear = !state.cleared.includes(mission.id);
       reward = firstClear ? mission.firstReward : mission.repeatReward;
@@ -448,15 +490,20 @@ const camp = (() => {
         if (unlocked) state.mission = unlocked;
       }
       state.gold = Math.min(state.gold + reward, Number.MAX_SAFE_INTEGER);
+      if (mission.id === "mine" && snapshot.used.includes("ledger") && !state.mineLedger) {
+        state.mineLedger = true;
+        state.inventory[snapshot.hero].push("pick");
+        pickUnlocked = true;
+      }
     }
     state.expedition = null;
     state.report = readReport({
-      mission: mission.id, hero: snapshot.hero, outcome, reward, unlocked, pending: true,
+      mission: mission.id, hero: snapshot.hero, outcome, reward, unlocked, pickUnlocked, pending: true,
       explored: snapshot.visited.length, kills: snapshot.enemies.filter((enemy) => !enemy.life).length, found: snapshot.used,
     });
     save();
     return state.report;
   }
 
-  return { init, show, profile, saveExpedition, settleExpedition };
+  return { init, show, profile, saveExpedition, settleExpedition, hasMineLedger: () => state.mineLedger };
 })();

@@ -1,5 +1,20 @@
 "use strict";
 
+const cloisterRoutes = {
+  W: { flag: "westLamp", lamp: "余烬壁灯", passage: "西侧抄经廊", heavyName: "焚烬斩", heavyDamage: 15 },
+  E: { flag: "eastLamp", lamp: "寒银壁灯", passage: "东侧回声廊", heavyName: "寒钟碎响", heavyDamage: 19, charge: true, windup: "摇动寒银钟" },
+};
+
+function cloisterRoute(used) {
+  if (used.has(cloisterRoutes.W.flag)) return cloisterRoutes.W;
+  return used.has(cloisterRoutes.E.flag) ? cloisterRoutes.E : null;
+}
+
+function closedLampGate(tile, used) {
+  const route = cloisterRoutes[tile];
+  return Boolean(route && !used.has(route.flag));
+}
+
 const missions = {
   vault: {
     id: "vault",
@@ -89,6 +104,7 @@ const missions = {
     landmarks: [
       { x: 1, y: 6, type: "drain", art: "valve", title: "排水闸轮" },
       { x: 13, y: 6, type: "cache", art: "chest", title: "干燥的工具箱" },
+      { x: 13, y: 7, type: "ledger", art: "ledger", title: "矿工名册" },
       { x: 9, y: 6, type: "shrine", art: "altar", title: "矿工壁龛", copy: "你在旧壁龛旁歇息。石台里的一点蓝火恢复了你的生命与专注。" },
       { x: 7, y: 1, type: "exit", art: "bell", title: "井铃" },
     ],
@@ -96,6 +112,57 @@ const missions = {
       [6.77, 11.32], [8.72, 10.27], [7.83, 8.35], [5.37, 8.24],
       [2.6, 8.42], [1.28, 6.38], [4.2, 6.27], [7.7, 6.26], [12.65, 6.32],
       [7.76, 4.38], [9.45, 6.19], [6.29, 2.67], [8.7, 1.43],
+    ],
+  },
+  cloister: {
+    id: "cloister",
+    title: "失声修道院",
+    chapter: "第 III 层",
+    contract: "点亮一盏壁灯，沿它打开的回廊进入唱经厅，击败缄默司钟人，敲响晨钟。",
+    firstReward: 120,
+    repeatReward: 60,
+    requires: "mine",
+    intro: "推开修道院的石门。门轴动了，屋里却连一声摩擦都听不见。",
+    successTitle: "晨钟破晓",
+    success: "第一声钟鸣越过院墙。你终于听见风穿过回廊，带着山下灰鸦镇的回应。",
+    exitBlocked: "钟绳被无声的咒术缠住。击败司钟人后再拉钟绳。",
+    bossDefeated: "司钟人的铃槌落地。去北端的钟架拉响晨钟。",
+    ending: "晨钟响起时，灰鸦镇的铁匠停下了锤子。酒馆老板走到门外，听完最后一声回响，才回屋给归来的人添了盏灯。三座地牢的委托就此结清。",
+    start: { x: 7, y: 12 },
+    layout: [
+      "###############",
+      "#.............#",
+      "#.###.....###.#",
+      "#.............#",
+      "###.###.#####.#",
+      "#.....###.##..#",
+      "#.....###.....#",
+      "###W#######E###",
+      "#.............#",
+      "#.###.....###.#",
+      "#.....#.#.....#",
+      "#.............#",
+      "#.............#",
+      "###############",
+    ],
+    encounters: [
+      { x: 7, y: 10, name: "静门看守", hp: 18, art: "skeleton", damage: 4 },
+      { x: 3, y: 6, name: "灰烛执事", hp: 27, art: "warden", damage: 6, armor: 1 },
+      { x: 13, y: 5, name: "冷廊哨卫", hp: 32, art: "skeleton", damage: 5 },
+      { x: 7, y: 3, name: "缄默司钟人", hp: 56, art: "cantor", damage: 7, armor: 2, lanternTactics: true },
+    ],
+    landmarks: [
+      { x: 6, y: 9, type: "westLamp", art: "lamp", gate: "W", title: cloisterRoutes.W.lamp },
+      { x: 8, y: 9, type: "eastLamp", art: "lamp", gate: "E", title: cloisterRoutes.E.lamp },
+      { x: 2, y: 5, type: "westCache", art: "chest", title: "抄经台补给匣", potions: 1 },
+      { x: 12, y: 6, type: "cache", art: "chest", title: "回廊补给箱" },
+      { x: 7, y: 2, type: "shrine", art: "altar", title: "唱经龛", copy: "石龛里有一盏长明灯。你借它的光恢复了生命和专注。" },
+      { x: 7, y: 1, type: "exit", art: "bell", title: "晨钟" },
+    ],
+    torches: [
+      [6.76, 11.32], [7.76, 9.35], [5.45, 8.19], [9.55, 8.19], [2.67, 8.34],
+      [11.64, 8.33], [3.69, 5.3], [12.56, 6.18], [13.55, 4.35],
+      [5.42, 3.24], [8.65, 3.24], [7.73, 1.28],
     ],
   },
 };

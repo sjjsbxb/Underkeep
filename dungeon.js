@@ -17,7 +17,6 @@ const drawables = {};
 let game;
 let camera;
 let motion;
-let flash;
 let audio;
 let sound = false;
 let modalOptions = [];
@@ -44,7 +43,7 @@ function enterExpedition(run) {
   game.lightField = buildLightField(mission);
   camera = { x: x + .5, y: y + .5, angle: (facing - 1) * Math.PI / 2 };
   motion = null;
-  flash = null;
+  combatFx.clear();
   closeModal(false);
   $("#camp").hidden = true;
   $("#expedition").hidden = false;
@@ -63,6 +62,7 @@ function enterExpedition(run) {
 
 function showCamp(message) {
   const returning = Boolean(game);
+  combatFx.clear();
   game = null;
   closeModal(false);
   $("#expedition").hidden = true;
@@ -88,7 +88,7 @@ function tile(x, y) {
 
 function wallAt(x, y) {
   const ground = tile(x, y);
-  return ground === "#" || (ground === "D" && !game.door);
+  return ground === "#" || (ground === "D" && !game.door) || closedLampGate(ground, game.used);
 }
 
 function floodedAt(x, y) {
@@ -107,8 +107,12 @@ function enemyAt(x, y) {
   return game.enemies.find((enemy) => enemy.x === x && enemy.y === y && enemy.life > 0);
 }
 
+function availableLandmark(item) {
+  return item.art === "lamp" || (!game.used.has(item.type) && (item.type !== "ledger" || !camp.hasMineLedger()));
+}
+
 function landmarkAt(x, y) {
-  return game.mission.landmarks.find((item) => item.x === x && item.y === y && !game.used.has(item.type));
+  return game.mission.landmarks.find((item) => item.x === x && item.y === y && availableLandmark(item));
 }
 
 function ahead() {
@@ -184,12 +188,15 @@ function useLandmark(item) {
       note("从遗匣取出黄铜钥匙与一瓶药剂。", true);
       describe(item.title, "一把黄铜钥匙压着一片烧焦的纸。上面写着：\n「木已烧尽，烟已散去。守火人的誓言留在余烬里。」");
       break;
-    case "cache":
-      game.used.add("cache");
-      game.potions += 2;
-      note("拾得两瓶治疗药剂。", true);
-      describe(item.title, "皮扣一碰就断，里面的两只药瓶仍然完好。");
+    case "westCache":
+    case "cache": {
+      const amount = item.potions ?? 2;
+      game.used.add(item.type);
+      game.potions += amount;
+      note(`拾得治疗药剂 ×${amount}。`, true);
+      describe(item.title, `皮扣一碰就断，箱里还有 ${amount} 瓶完好的治疗药剂。`);
       break;
+    }
     case "secret":
       game.used.add("secret");
       game.sword = true;
@@ -230,6 +237,39 @@ function useLandmark(item) {
         ["退后", () => closeModal()],
       ]);
       break;
+    case "ledger":
+      if (!game.used.has("drain")) {
+        describe("泡在水里的文书箱", "水还没退，够不到锁扣。先去西侧泵房排水。");
+        break;
+      }
+      game.used.add("ledger");
+      note("从东侧工具巷取回矿工名册。通关后把它交给铁匠。", true);
+      tone("mechanism");
+      describe(item.title, "油布保住了矿工名册。最后一页夹着旧短镐的锻造图，带回灰鸦镇交给铁匠。");
+      break;
+    case "westLamp":
+    case "eastLamp": {
+      const route = cloisterRoutes[item.gate];
+      if (game.used.has(route.flag) || !game.enemies.at(-1).life) {
+        describe(item.title, game.used.has(route.flag) ? `${route.passage}已经打开，另一侧石门关闭。` : "司钟人已倒下。晨钟正等着你。");
+        break;
+      }
+      const pattern = route.charge ? `司钟人会先蓄力，再使出「${route.heavyName}」。` : `司钟人每隔一回合便会使出「${route.heavyName}」。`;
+      openModal("修道院机关", item.title, `点亮这盏壁灯会打开${route.passage}，并熄灭另一盏灯。${pattern}`, [
+        ["点亮壁灯", () => {
+          game.used.delete(cloisterRoutes.W.flag);
+          game.used.delete(cloisterRoutes.E.flag);
+          game.used.add(route.flag);
+          reveal();
+          note(`${route.lamp}亮起，${route.passage}的石门缓缓升起。`, true);
+          tone("mechanism");
+          closeModal();
+          updateCheckpoint();
+        }],
+        ["退后", () => closeModal()],
+      ]);
+      break;
+    }
     case "exit":
       if (game.enemies.at(-1).life > 0) {
         describe(item.title, game.mission.exitBlocked);
@@ -265,6 +305,8 @@ function interact() {
     }
   } else if (item) {
     useLandmark(item);
+  } else if (closedLampGate(tile(x, y), game.used)) {
+    describe("沉重的石门", `点亮大厅里的${cloisterRoutes[tile(x, y)].lamp}才能打开这扇门。`);
   } else if (floodedAt(x, y)) {
     describe("淹没的通道", "水没过了头顶。西侧泵房的闸轮可以排水。");
   } else {
@@ -276,17 +318,20 @@ function startBattle(enemy) {
   const enemyDirection = directions.findIndex(([dx, dy]) => game.x + dx === enemy.x && game.y + dy === enemy.y);
   if (enemyDirection !== -1) game.facing = enemyDirection;
   game.battle = { enemy, round: 1 };
+  combatFx.clear();
   note(`${enemy.name}挡住了去路。`, true);
   tone("encounter");
 }
 
 function enemyIntent({ enemy, round, interruptRound, interruptPenalty }) {
-  if (enemy.charge && round % 3 === 2) {
-    return { kind: "charge", damage: 0, interrupted: interruptRound === round + 1 };
+  const pattern = (enemy.lanternTactics && cloisterRoute(game.used)) || enemy;
+  const { charge, heavyName, heavyDamage, windup = "高举铁镐" } = pattern;
+  if (charge && round % 3 === 2) {
+    return { kind: "charge", damage: 0, name: heavyName, nextDamage: heavyDamage, windup, interrupted: interruptRound === round + 1 };
   }
-  if (enemy.heavyDamage && round % (enemy.charge ? 3 : 2) === 0) {
+  if (heavyDamage && round % (charge ? 3 : 2) === 0) {
     if (round === interruptRound) return { kind: "staggered", damage: enemy.damage - interruptPenalty, name: "仓促反击" };
-    return { kind: "heavy", damage: enemy.heavyDamage, name: enemy.heavyName };
+    return { kind: "heavy", damage: heavyDamage, name: heavyName };
   }
   return { kind: "normal", damage: enemy.damage, name: "反击" };
 }
@@ -294,9 +339,11 @@ function enemyIntent({ enemy, round, interruptRound, interruptPenalty }) {
 function retaliation(battle, damageMultiplier) {
   const intent = enemyIntent(battle);
   const { enemy } = battle;
+  const delay = 145;
   if (intent.kind === "charge") {
     if (!intent.interrupted) {
-      note(`${enemy.name}高举铁镐，下一回合将使出${enemy.heavyName}。`, true);
+      note(`${enemy.name}${intent.windup}，下一回合将使出${intent.name}。`, true);
+      combatFx.emit("charge", "蓄力", delay);
       tone("charge");
     }
     battle.round++;
@@ -306,7 +353,12 @@ function retaliation(battle, damageMultiplier) {
   const { player } = game;
   player.life = Math.max(0, player.life - damage);
   note(`${enemy.name}的${intent.name}造成 ${damage} 点伤害。`);
-  flash = { start: performance.now(), color: "red" };
+  if (damageMultiplier < 1) {
+    if (intent.kind === "heavy") combatFx.emit("heavy", null, delay);
+    combatFx.emit("blocked", damage, delay);
+  } else {
+    combatFx.emit(intent.kind === "heavy" ? "heavy" : "damage", damage, delay);
+  }
   if (!player.life) {
     finish(false);
     return;
@@ -316,19 +368,19 @@ function retaliation(battle, damageMultiplier) {
   if (enemyIntent(battle).kind === "heavy") tone("charge");
 }
 
-function attack(enemy, damage, name) {
+function attack(enemy, damage, name, style) {
   enemy.life = Math.max(0, enemy.life - damage);
   note(`${name}造成 ${damage} 点伤害。`);
-  flash = { start: performance.now(), color: "gold" };
+  combatFx.hit(enemy, style, damage);
   tone("hit");
 }
 
-function physicalDamage(enemy, power) {
-  return Math.max(1, power - (enemy.armor ?? 0));
+function physicalDamage(enemy, power, pierce = 0) {
+  return Math.max(1, power - Math.max(0, (enemy.armor ?? 0) - pierce));
 }
 
 function basicAttackDamage(hero, enemy) {
-  return physicalDamage(enemy, hero.attack + (game.sword ? 3 : 0));
+  return physicalDamage(enemy, hero.attack + (game.sword ? 3 : 0), hero.pierce);
 }
 
 function skillEffect(hero, battle, intent) {
@@ -346,40 +398,48 @@ function skillEffect(hero, battle, intent) {
 function battleAction(action) {
   const { battle, player, hero } = game;
   const { enemy } = battle;
+  if (!["attack", "guard", "potion", "skill"].includes(action) ||
+      (action === "skill" && !player.energy) ||
+      (action === "potion" && (!game.potions || player.life >= hero.hp))) return;
+  combatFx.begin();
   let damageMultiplier = 1;
   if (action === "attack") {
-    attack(enemy, basicAttackDamage(hero, enemy), "普通攻击");
+    attack(enemy, basicAttackDamage(hero, enemy), "普通攻击", "slash");
   } else if (action === "guard") {
     damageMultiplier = 1 / 3;
+    combatFx.emit("guard");
     if (player.energy < hero.focus) {
       player.energy++;
       note("你举盾防御，恢复 1 点专注。");
     } else {
       note("你举盾防御。");
     }
-  } else if (action === "potion" && game.potions && player.life < hero.hp) {
+  } else if (action === "potion") {
     game.potions--;
     const restored = Math.min(16, hero.hp - player.life);
     player.life += restored;
     note(`治疗药剂恢复了 ${restored} 点生命。`);
+    combatFx.emit("potion", restored);
     tone("potion");
-  } else if (action === "skill" && player.energy) {
+  } else {
     player.energy--;
-    const effect = skillEffect(hero, battle, enemyIntent(battle));
+    const intent = enemyIntent(battle);
+    const effect = skillEffect(hero, battle, intent);
     damageMultiplier = effect.multiplier;
-    attack(enemy, effect.damage, hero.skill);
+    const style = { guard: "bash", scout: "thrust", mage: "ember" }[hero.id];
+    attack(enemy, effect.damage, hero.skill, style);
     if (enemy.life && effect.armorBreak) {
       enemy.armor -= effect.armorBreak;
       note(`余火烧开了护甲，${enemy.name}失去 ${effect.armorBreak} 点护甲。`, true);
+      combatFx.emit("armor", "破甲", 75);
     }
     if (enemy.life && effect.interruptRound) {
       battle.interruptRound = effect.interruptRound;
       battle.interruptPenalty = hero.interruptPenalty;
-      note(`穿刺打断了${enemy.heavyName}，敌人改用仓促反击。`, true);
+      note(`穿刺打断了${intent.name}，敌人改用仓促反击。`, true);
+      combatFx.emit("interrupt", "打断", 75);
       tone("interrupt");
     }
-  } else {
-    return;
   }
   if (!enemy.life) {
     game.battle = null;
@@ -424,6 +484,7 @@ function dispatch(action) {
       startBattle(enemy);
     } else if (solid(x, y)) {
       if (tile(x, y) === "D") describe("墓窟铁门", "面向铁门后按 F，看看锁孔和门上的印记。");
+      else if (closedLampGate(tile(x, y), game.used)) describe("沉重的石门", `点亮大厅里的${cloisterRoutes[tile(x, y)].lamp}才能打开这扇门。`);
       else if (floodedAt(x, y)) describe("淹没的通道", "水没过了头顶。西侧泵房的闸轮可以排水。");
       else tone("wall");
     } else {
@@ -445,6 +506,12 @@ function dispatch(action) {
 
 function goal() {
   if (game.ended) return [game.player.life ? game.mission.successTitle : "远征结束", "返回灰鸦镇继续整备。"];
+  if (game.mission.id === "cloister") {
+    const route = cloisterRoute(game.used);
+    if (!route) return ["选择一盏壁灯", "向北到双灯厅。余烬灯开西侧，寒银灯开东侧。"];
+    if (game.enemies.at(-1).life) return ["击败缄默司钟人", `${route.lamp}已点亮。沿${route.passage}去唱经厅，留意「${route.heavyName}」。`];
+    return ["敲响晨钟", "去唱经厅北端，面向钟架互动。"];
+  }
   if (game.mission.id === "mine") {
     if (!game.used.has("drain")) return ["找到排水闸轮", "从入井栈道绕向西侧泵房，降低水位。"];
     if (game.enemies.at(-1).life) return ["击败沉钟矿监", "穿过已排水的北侧通道。矿监举起铁镐后，准备挡住重击。"];
@@ -458,6 +525,11 @@ function goal() {
 }
 
 function areaName() {
+  if (game.mission.id === "cloister") {
+    if (game.y <= 4) return "唱经厅";
+    if (game.y <= 7) return game.x < 7 ? cloisterRoutes.W.passage : cloisterRoutes.E.passage;
+    return game.y <= 9 ? "双灯厅" : "寂静前庭";
+  }
   if (game.mission.id === "mine") {
     if (game.y <= 4) return "北侧采掘厅";
     if (game.y <= 8 && game.x <= 3) return "西侧泵房";
@@ -475,6 +547,8 @@ function update() {
   const [title, detail] = goal();
   $("#goal").textContent = title;
   $("#goal-detail").textContent = detail;
+  $("#sidequest").hidden = game.mission.id !== "mine" || camp.hasMineLedger();
+  $("#sidequest-detail").textContent = game.used.has("ledger") ? "名册已拾取。完成本次远征后交给铁匠。" : "排水后搜索东侧工具巷的文书箱，带着名册完成远征。";
   $("#area").textContent = areaName();
   $("#compass").textContent = headings[game.facing];
   const { battle, player, hero } = game;
@@ -495,14 +569,14 @@ function update() {
     const intent = enemyIntent(battle);
     const effect = skillEffect(hero, battle, intent);
     let bonus = "";
-    if (effect.interruptRound) bonus = ` · 打断${enemy.heavyName}`;
+    if (effect.interruptRound) bonus = ` · 打断${intent.name}`;
     else if (effect.armorBreak) bonus = ` · 破甲 ${effect.armorBreak}`;
     else if (hero.heavyBlock && intent.damage) bonus = ` · 承伤 ${Math.ceil(intent.damage * effect.multiplier)}`;
     const skillPreview = player.energy ? `${hero.skill} ${effect.damage}${bonus}` : `${hero.skill}专注不足`;
     $("#mode-detail").textContent = `普攻 ${basicAttackDamage(hero, enemy)} · ${skillPreview}`;
     $("#prompt").dataset.intent = intent.kind;
     if (intent.kind === "charge") {
-      $("#prompt").textContent = `蓄力 · 本回合不攻击 · 下回合${enemy.heavyName} ${enemy.heavyDamage} 伤害`;
+      $("#prompt").textContent = `蓄力 · 本回合不攻击 · 下回合${intent.name} ${intent.nextDamage} 伤害`;
     } else if (intent.kind === "staggered") {
       $("#prompt").textContent = `重击已打断 · 仓促反击 ${intent.damage} 伤害`;
     } else {
@@ -515,9 +589,10 @@ function update() {
     const [x, y] = ahead();
     const nearby = enemyAt(x, y) ?? landmarkAt(x, y) ?? landmarkAt(game.x, game.y);
     const gate = tile(x, y) === "D" && !game.door;
+    const lampGate = closedLampGate(tile(x, y), game.used);
     $("#mode-detail").textContent = "朝向目标后互动";
     $("#prompt").textContent = game.ended ? "" : nearby ? `F · ${nearby.title ?? nearby.name}` :
-      gate ? "F · 墓窟铁门" : floodedAt(x, y) ? "积水挡住了通道" : "";
+      gate ? "F · 墓窟铁门" : lampGate ? "F · 沉重的石门" : floodedAt(x, y) ? "积水挡住了通道" : "";
   }
   $("#player-card").classList.toggle("active", Boolean(battle));
   $("#player-card").classList.toggle("fallen", !player.life);
@@ -558,7 +633,8 @@ function drawMap() {
       map.fillStyle = !seen ? "#151d16" : floodedAt(x, y) ? "#396468" : wallAt(x, y) ? "#343d30" : game.visited.has(id) ? "#57624c" : "#3b4938";
       map.fillRect(left + x * size, top + y * size, size - 1, size - 1);
       if (!seen) continue;
-      if (tile(x, y) === "D" && !game.door) map.fillStyle = "#d6a75c";
+      if (closedLampGate(tile(x, y), game.used)) map.fillStyle = tile(x, y) === "W" ? "#ca8453" : "#8ea9b4";
+      else if (tile(x, y) === "D" && !game.door) map.fillStyle = "#d6a75c";
       else if (enemyAt(x, y)) map.fillStyle = "#c07157";
       else if (landmarkAt(x, y)) map.fillStyle = "#d1c292";
       else continue;
@@ -722,7 +798,7 @@ function makeTexture(kind) {
       const grit = (hash(x >> 1, y >> 1, 4) % 15) - 7;
       const broad = (hash(x >> 3, y >> 3, 1) % 15) - 7;
       let color;
-      if (kind === "stone") {
+      if (kind === "stone" || kind === "cloister") {
         const course = y >> 4;
         const u = (x + (course % 2) * 13 + (course === 3 ? 4 : 0)) & 63;
         const row = y % 16;
@@ -733,7 +809,13 @@ function makeTexture(kind) {
           : row === 1 || seam === 1 ? 105
             : row === 15 || seam === 31 ? 52 : 80 + offset + broad;
         const moss = (hash(x >> 3, y >> 2, 8) % 5 === 0 && row > 8) ? 10 : 0;
-        color = [base + grit + noise + 7 - moss, base + grit + noise + 6, base + grit + noise - 4 - moss];
+        if (kind === "cloister") {
+          const trim = x > 3 && x < 60 && (y === 12 || y === 51);
+          const stone = base + grit + noise + (trim ? 20 : 5);
+          color = [stone + 6 - moss, stone + 7, stone + 11 - moss];
+        } else {
+          color = [base + grit + noise + 7 - moss, base + grit + noise + 6, base + grit + noise - 4 - moss];
+        }
       } else if (kind === "mine") {
         const ridge = (x + y * 2 + (hash(y >> 3, 4) % 6)) % 29;
         const fissure = (ridge < 2 && hash(x >> 4, y >> 3, 28) % 5 !== 0) || (y + (x >> 2)) % 21 === 0;
@@ -751,6 +833,11 @@ function makeTexture(kind) {
         const base = 54 + broad + (noise >> 1);
         color = rail <= 2 ? [90 + noise, 85 + noise, 72 + noise] :
           rail === 3 ? [39, 35, 30] : tie ? [base + 11, base - 3, base - 11] : [base + 1, base + 5, base - 1];
+      } else if (kind === "westGate" || kind === "eastGate") {
+        const gap = x < 5 || x > 58 || y < 6 || y % 16 < 2;
+        const rune = Math.abs(x - 32) + Math.abs(y - 33) < 10 && (x === 32 || y === 33 || Math.abs(x - 32) + Math.abs(y - 33) === 8);
+        const base = (gap ? 29 : 65) + grit + noise;
+        color = rune ? (kind === "westGate" ? [154, 99, 51] : [96, 136, 153]) : [base + 3, base + 2, base + 5];
       } else if (kind === "door") {
         const band = y >= 10 && y <= 14 || y >= 42 && y <= 46;
         const rivet = band && y % 32 === 12 && x % 13 === 5;
@@ -771,7 +858,9 @@ function makeTexture(kind) {
 
 const stone = makeTexture("stone");
 const mineStone = makeTexture("mine");
+const cloisterStone = makeTexture("cloister");
 const iron = makeTexture("door");
+const lampGateTextures = { W: makeTexture("westGate"), E: makeTexture("eastGate") };
 const floor = makeTexture("floor");
 const water = makeTexture("water");
 const rails = makeTexture("rail");
@@ -829,7 +918,7 @@ function drawSurfaces(dx, dy, rx, ry, flicker, now) {
 }
 
 function drawWalls(dx, dy, rx, ry, flicker) {
-  const wallTexture = game.mission.id === "mine" ? mineStone : stone;
+  const wallTexture = game.mission.id === "mine" ? mineStone : game.mission.id === "cloister" ? cloisterStone : stone;
   const { lightField } = game;
   for (let x = 0; x < width; x++) {
     const across = (x + .5 - width / 2) / focal;
@@ -859,7 +948,8 @@ function drawWalls(dx, dy, rx, ry, flicker) {
     } while (!wallAt(gx, gy));
     depth = Math.max(.03, depth);
     depths[x] = depth;
-    const source = tile(gx, gy) === "D" ? iron : wallTexture;
+    const wall = tile(gx, gy);
+    const source = wall === "D" ? iron : lampGateTextures[wall] ?? wallTexture;
     const point = side ? camera.y + depth * rayY : camera.x + depth * rayX;
     const texX = ((point - Math.floor(point)) * 64) & 63;
     const length = focal / depth;
@@ -1073,6 +1163,54 @@ function initArt() {
   drawables.skeleton = buildEnemy(false);
   drawables.warden = buildEnemy(true);
   drawables.miner = buildEnemy(true, true);
+  drawables.cantor = sprite(108, 143, (p) => {
+    polygon(p, "#201e26", [[19, 131], [30, 82], [21, 76], [25, 46], [42, 36], [37, 22], [53, 4], [65, 13], [74, 35], [91, 52], [93, 78], [82, 83], [88, 130]]);
+    polygon(p, "#494454", [[27, 124], [37, 73], [29, 62], [32, 48], [48, 39], [62, 40], [78, 49], [84, 64], [73, 77], [80, 123], [61, 133], [38, 132]]);
+    polygon(p, "#666177", [[35, 50], [49, 41], [56, 47], [49, 58], [47, 90], [36, 122], [31, 120], [42, 72]]);
+    polygon(p, "#36343f", [[61, 46], [75, 50], [81, 60], [71, 75], [75, 104], [80, 123], [60, 131], [64, 103], [60, 75]]);
+    polygon(p, "#7a6b55", [[49, 45], [61, 45], [64, 64], [60, 112], [54, 126], [49, 110], [52, 65]]);
+    polygon(p, "#4c4350", [[39, 27], [49, 15], [54, 8], [64, 18], [70, 35], [61, 43], [45, 40]]);
+    polygon(p, "#b2a187", [[44, 27], [52, 20], [62, 23], [65, 31], [60, 39], [48, 37]]);
+    polygon(p, "#746b67", [[60, 23], [65, 31], [60, 39], [54, 38], [58, 32]]);
+    p.fillStyle = "#32252a";
+    p.fillRect(48, 28, 5, 2);
+    p.fillRect(58, 29, 4, 2);
+    p.fillRect(51, 35, 8, 2);
+    p.fillStyle = "#c7af71";
+    p.fillRect(53, 51, 6, 7);
+    p.fillRect(51, 72, 10, 3);
+    polygon(p, "#5b5253", [[24, 48], [31, 52], [30, 66], [44, 73], [41, 81], [23, 76], [20, 67]]);
+    polygon(p, "#51464c", [[79, 50], [89, 55], [92, 71], [86, 80], [77, 75], [83, 65]]);
+    polygon(p, "#5b4435", [[77, 113], [91, 35], [96, 36], [84, 116]]);
+    polygon(p, "#a08056", [[80, 109], [92, 38], [94, 39], [82, 112]]);
+    polygon(p, "#af8e53", [[86, 35], [86, 24], [90, 18], [98, 19], [102, 26], [102, 36], [107, 40], [105, 44], [82, 43], [81, 40]]);
+    polygon(p, "#dec08a", [[89, 26], [92, 21], [98, 22], [99, 26], [99, 35], [101, 39], [87, 38], [90, 34]]);
+    p.fillStyle = "#88734e";
+    p.fillRect(91, 44, 5, 4);
+  });
+  for (const [id, color] of Object.entries({ lamp: null, westLamp: "#f29a53", eastLamp: "#93c7df" })) {
+    drawables[id] = sprite(56, 98, (p) => {
+      polygon(p, "#272831", [[8, 88], [13, 82], [20, 79], [22, 42], [16, 38], [16, 33], [40, 33], [40, 39], [34, 42], [36, 79], [43, 82], [49, 88], [47, 93], [10, 93]]);
+      p.fillStyle = "#766e66";
+      p.fillRect(16, 36, 22, 3);
+      p.fillRect(22, 43, 4, 37);
+      p.fillRect(13, 85, 31, 3);
+      if (!color) return;
+      polygon(p, color, [[19, 33], [18, 25], [23, 18], [23, 12], [27, 17], [32, 5], [37, 17], [37, 24], [40, 30], [34, 34]]);
+      polygon(p, "#fff3cb", [[24, 32], [25, 26], [30, 19], [32, 15], [35, 25], [35, 30], [31, 33]]);
+    });
+  }
+  drawables.ledger = sprite(66, 50, (p) => {
+    polygon(p, "#241c16", [[7, 25], [12, 17], [42, 13], [58, 23], [60, 40], [50, 45], [9, 42]]);
+    polygon(p, "#63523e", [[9, 26], [15, 19], [42, 16], [55, 24], [51, 31], [12, 33]]);
+    polygon(p, "#54422f", [[12, 34], [51, 32], [55, 26], [56, 39], [50, 42], [12, 40]]);
+    polygon(p, "#a58d5e", [[24, 23], [32, 18], [44, 19], [48, 24], [40, 28], [26, 28]]);
+    p.fillStyle = "#d4be82";
+    p.fillRect(29, 22, 11, 2);
+    p.fillStyle = "#715739";
+    p.fillRect(31, 22, 2, 2);
+    p.fillRect(31, 33, 7, 5);
+  });
   drawables.valve = sprite(72, 84, (p) => {
     polygon(p, "#202d29", [[18, 76], [18, 65], [33, 61], [33, 28], [41, 28], [41, 61], [55, 65], [55, 76]]);
     polygon(p, "#514639", [[17, 19], [26, 8], [47, 8], [57, 19], [57, 40], [46, 51], [26, 51], [17, 40]]);
@@ -1106,12 +1244,15 @@ function initArt() {
 function drawObjects(dx, dy, rx, ry, now) {
   const { landmarks, torches } = game.mission;
   const items = [
-    ...game.enemies.filter((enemy) => enemy.life > 0).map((enemy) => ({
-      image: drawables[enemy.art], x: enemy.x + .5, y: enemy.y + .5, size: enemy.art === "skeleton" ? .76 : .88, lift: 0,
-    })),
-    ...landmarks.filter((item) => !game.used.has(item.type)).map((item) => ({
-      image: drawables[item.art], x: item.x + .5, y: item.y + .5,
-      size: { chest: .31, altar: .61, portal: .98, plaque: .45, valve: .65, bell: .87 }[item.art], lift: 0,
+    ...game.enemies.flatMap((enemy) => {
+      const pose = combatFx.pose(enemy, now);
+      if (!enemy.life && !pose) return [];
+      return [{ image: drawables[enemy.art], x: enemy.x + .5, y: enemy.y + .5,
+        size: enemy.art === "skeleton" ? .76 : .88, lift: 0, pose }];
+    }),
+    ...landmarks.filter(availableLandmark).map((item) => ({
+      image: drawables[item.art === "lamp" && game.used.has(item.type) ? item.type : item.art], x: item.x + .5, y: item.y + .5,
+      size: { chest: .31, ledger: .34, altar: .61, portal: .98, plaque: .45, valve: .65, bell: .87, lamp: .68 }[item.art], lift: 0,
     })),
     ...torches.map(([x, y], index) => ({
       image: drawables.torch[(Math.floor(now / 105) + index) % 4], x, y, size: .41, lift: .37,
@@ -1122,13 +1263,13 @@ function drawObjects(dx, dy, rx, ry, now) {
     const y = item.y - camera.y;
     return { ...item, depth: x * dx + y * dy, offset: x * rx + y * ry };
   }).filter((item) => item.depth > .22).sort((a, b) => b.depth - a.depth);
-  for (const { image, depth, offset, size, lift } of visible) {
+  for (const { image, depth, offset, size, lift, pose } of visible) {
     const scale = focal / depth;
     const spriteHeight = scale * size;
     const spriteWidth = spriteHeight * image.width / image.height;
-    const left = width / 2 + offset * scale - spriteWidth / 2;
-    const top = height / 2 + (.51 - lift) * scale - spriteHeight;
-    ctx.globalAlpha = clamp(1.18 - depth * .083, .28, 1);
+    const left = width / 2 + offset * scale - spriteWidth / 2 + (pose?.x ?? 0);
+    const top = height / 2 + (.51 - lift) * scale - spriteHeight + (pose?.y ?? 0);
+    ctx.globalAlpha = clamp(1.18 - depth * .083, .28, 1) * (pose?.alpha ?? 1);
     const last = Math.min(width, Math.ceil(left + spriteWidth));
     let column = Math.max(0, Math.floor(left));
     while (column < last) {
@@ -1156,7 +1297,8 @@ let lastFrame = -100;
 function frame(now) {
   requestAnimationFrame(frame);
   if (!game) return;
-  if (!motion && !flash && now - lastFrame < 74) return;
+  const hasEffects = combatFx.active(now);
+  if (!motion && !hasEffects && now - lastFrame < 74) return;
   lastFrame = now;
   if (motion) {
     const progress = clamp((now - motion.start) / 135, 0, 1);
@@ -1166,8 +1308,9 @@ function frame(now) {
     camera.angle = motion.from.angle + motion.turn * ease;
     if (progress === 1) motion = null;
   }
-  const dx = Math.cos(camera.angle);
-  const dy = Math.sin(camera.angle);
+  const renderAngle = camera.angle + combatFx.cameraKick(now);
+  const dx = Math.cos(renderAngle);
+  const dy = Math.sin(renderAngle);
   const flicker = .98 + Math.sin(now / 110) * .08 + Math.cos(now / 241) * .04;
   drawSurfaces(dx, dy, -dy, dx, flicker, now);
   drawWalls(dx, dy, -dy, dx, flicker);
@@ -1176,17 +1319,7 @@ function frame(now) {
   drawObjects(dx, dy, -dy, dx, now);
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, width, height);
-  if (flash) {
-    const intensity = 1 - (now - flash.start) / 225;
-    if (intensity > 0) {
-      ctx.globalAlpha = intensity * .23;
-      ctx.fillStyle = flash.color === "red" ? "#b83c27" : "#d7ad60";
-      ctx.fillRect(0, 0, width, height);
-      ctx.globalAlpha = 1;
-    } else {
-      flash = null;
-    }
-  }
+  if (hasEffects) combatFx.draw(ctx, now, width, height);
 }
 
 initArt();

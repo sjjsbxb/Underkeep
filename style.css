@@ -84,7 +84,9 @@ kbd { font: 10px system-ui, sans-serif; margin-left: 3px; color: #c4ae7d; }
 .journal { border-top: 1px solid #8e7442; background: linear-gradient(110deg, #28271b, var(--panel)); }
 .journal .eyebrow span { color: #a2936b; }
 .journal h2 { font-size: 22px; line-height: 1.3; margin: 4px 0; }
-.journal > p:last-child { color: var(--muted); font-size: 12px; line-height: 1.55; }
+#goal-detail, .sidequest p { color: var(--muted); font-size: 12px; line-height: 1.55; }
+.sidequest { margin-top: 9px; border-top: 1px solid var(--line); padding-top: 8px; }
+.sidequest h3 { margin: 0 0 3px; color: var(--gold); font-size: 12px; }
 #map { display: block; width: 100%; max-width: 235px; margin: 8px auto 4px; image-rendering: pixelated; background: #111713; }
 .legend { justify-content: space-between; gap: 5px; font-size: 10px; color: var(--muted); }
 .legend span:nth-child(1) { color: #ffe0a0; }

@@ -25,8 +25,9 @@ const expeditionSave = (() => {
     if (!Array.isArray(raw.used)) return null;
     const used = new Set(landmarks.filter((item) => item.type !== "exit" && raw.used.includes(item.type)).map((item) => item.type));
     if (door && !(used.has("key") && used.has("riddle"))) return null;
+    if (used.has(cloisterRoutes.W.flag) && used.has(cloisterRoutes.E.flag)) return null;
     const tile = layout[y][x];
-    if (tile === "#" || (tile === "D" && !door) || (tile === "~" && !used.has("drain"))) return null;
+    if (tile === "#" || (tile === "D" && !door) || (tile === "~" && !used.has("drain")) || closedLampGate(tile, used)) return null;
     if (!Array.isArray(raw.enemies) || raw.enemies.length !== encounters.length) return null;
     const enemies = encounters.map((enemy, index) => {
       const saved = raw.enemies[index];
