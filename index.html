@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111815">
+  <title>余烬地窟 · Ashen Vault</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="dungeon.js" defer></script>
+</head>
+<body>
+  <main class="game">
+    <header class="masthead">
+      <div class="brand">
+        <span class="sigil" aria-hidden="true">◈</span>
+        <div><p class="eyebrow">A S H E N &nbsp; V A U L T</p><h1>余烬地窟</h1></div>
+      </div>
+      <div class="top-tools">
+        <span class="chapter">第 I 层 <span>／</span> 守火人的墓窟</span>
+        <button id="sound" class="quiet" aria-pressed="false" title="切换音效">音效关</button>
+        <button id="help" class="quiet" title="查看操作说明">操作</button>
+      </div>
+    </header>
+    <div class="workspace">
+      <section class="main-column" aria-label="地牢与队伍">
+        <div class="viewport">
+          <canvas id="view" width="512" height="288" role="img" aria-label="第一人称地牢视野"></canvas>
+          <div class="view-top"><span id="compass">↑ 北</span><span id="area">石门入口</span></div>
+          <div id="encounter" class="encounter" hidden>
+            <span id="enemy-name"></span><span id="enemy-life"></span><div class="enemy-meter"><i></i></div>
+          </div>
+          <div class="prompt" id="prompt" aria-live="polite"></div>
+          <div id="overlay" class="overlay" hidden>
+            <section id="overlay-card" class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="overlay-title" tabindex="-1">
+              <p id="overlay-tag" class="eyebrow"></p>
+              <h2 id="overlay-title"></h2>
+              <p id="overlay-copy"></p>
+              <div id="overlay-options" class="overlay-options"></div>
+            </section>
+          </div>
+        </div>
+        <div class="control-strip">
+          <div class="strip-label"><strong id="mode">探索</strong><span id="mode-detail">朝向目标后互动</span></div>
+          <div class="controls" id="explore-actions" aria-label="探索操作">
+            <button data-action="left" title="左转 Q 或 ←" aria-label="左转">↶</button>
+            <button data-action="forward" title="前进 W 或 ↑" aria-label="前进">↑</button>
+            <button data-action="back" title="后退 S 或 ↓" aria-label="后退">↓</button>
+            <button data-action="right" title="右转 E 或 →" aria-label="右转">↷</button>
+            <button data-action="interact" class="emphasis">互动 <kbd>F</kbd></button>
+          </div>
+          <div class="controls" id="battle-actions" aria-label="战斗操作" hidden>
+            <button data-action="attack">攻击 <kbd>1</kbd></button>
+            <button data-action="skill" class="emphasis">战技 <kbd>2</kbd></button>
+            <button data-action="guard">防御 <kbd>3</kbd></button>
+            <button data-action="potion">药剂 <kbd>4</kbd></button>
+          </div>
+        </div>
+        <section class="party-section" aria-labelledby="party-heading">
+          <div class="section-heading"><h2 id="party-heading">远征小队</h2><span id="supplies">药剂 ×2</span></div>
+          <div class="party" id="party"></div>
+        </section>
+      </section>
+      <aside class="sidebar">
+        <section class="panel journal">
+          <p class="eyebrow"><span>01</span> &nbsp; 当前目标</p>
+          <h2 id="goal"></h2>
+          <p id="goal-detail"></p>
+        </section>
+        <section class="panel map-panel">
+          <div class="section-heading"><h2>探路图</h2><span id="map-count"></span></div>
+          <canvas id="map" width="240" height="224" role="img" aria-label="已探索的地牢地图"></canvas>
+          <div class="legend"><span>▲ 队伍</span><span>◆ 地标</span><span>■ 未探明</span></div>
+        </section>
+        <section class="panel log-panel">
+          <div class="section-heading"><h2>远征记录</h2><span id="step-count"></span></div>
+          <ol id="log" aria-live="polite"></ol>
+        </section>
+      </aside>
+    </div>
+    <footer><span>ASHEN VAULT <b>◆</b> 原型 0.1</span><span>WASD 移动 <b>·</b> Q / E 转向 <b>·</b> F 互动</span></footer>
+  </main>
+</body>
+</html>
